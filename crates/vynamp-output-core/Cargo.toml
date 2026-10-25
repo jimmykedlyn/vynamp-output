@@ -1,0 +1,12 @@
+[package]
+name = "vynamp-output-core"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Core API types, errors, events and format negotiation for vynamp-output"
+
+[lints]
+workspace = true
