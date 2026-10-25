@@ -80,8 +80,12 @@ fn validate(req: &StreamRequest) -> Result<(), Error> {
                     return Err(invalid("dop conversion changes dsd rate"));
                 }
             }
-            // DoP needs an integer container with at least 24 valid bits.
-            (SampleFormat::Dop { .. }, pcm) | (pcm, SampleFormat::Dop { .. })
+            // PCM -> DoP would be DSD modulation; the library never synthesises.
+            (_, SampleFormat::Dop { .. }) => {
+                return Err(invalid("conversion cannot turn pcm into dop"));
+            }
+            // DoP -> PCM is only a container repack: integer, >= 24 valid bits.
+            (SampleFormat::Dop { .. }, pcm)
                 if matches!(pcm, SampleFormat::F32 | SampleFormat::F64)
                     || pcm.valid_bits() < 24 =>
             {

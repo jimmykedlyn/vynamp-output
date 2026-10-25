@@ -654,11 +654,11 @@ fn invalid_conversion_targets() {
     );
     assert_eq!(
         invalid(&conv(SampleFormat::F32, DOP)),
-        "dop requires a 24-bit capable container"
+        "conversion cannot turn pcm into dop"
     );
     assert_eq!(
         invalid(&conv(SampleFormat::I16, DOP)),
-        "dop requires a 24-bit capable container"
+        "conversion cannot turn pcm into dop"
     );
     assert_eq!(
         invalid(&conv(
@@ -669,4 +669,30 @@ fn invalid_conversion_targets() {
         )),
         "dop conversion changes dsd rate"
     );
+}
+
+#[test]
+fn pcm_to_dop_always_rejected_and_dop_repack_allowed() {
+    let mut r = request(SampleFormat::I24Packed, 176_400, 2);
+    r.conversion = Conversion::Allow(ConversionSpec {
+        from: SampleFormat::I24Packed,
+        to: DOP,
+    });
+    assert_eq!(invalid(&r), "conversion cannot turn pcm into dop");
+
+    for to in [
+        SampleFormat::I24Packed,
+        SampleFormat::I24In32 {
+            justify: Justify::Msb,
+        },
+        SampleFormat::I32 { valid_bits: 24 },
+    ] {
+        let c = caps(vec![entry(ShareMode::Exclusive, to, &[176_400], &[2])]);
+        let mut r = request(DOP, 176_400, 2);
+        let spec = ConversionSpec { from: DOP, to };
+        r.conversion = Conversion::Allow(spec);
+        let n = negotiate(&r, &c).unwrap();
+        assert_eq!(n.config_template.format, to);
+        assert_eq!(n.config_template.path.library_conversion, Some(spec));
+    }
 }
