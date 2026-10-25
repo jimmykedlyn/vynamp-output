@@ -69,8 +69,25 @@ fn validate(req: &StreamRequest) -> Result<(), Error> {
         if spec.from != req.format {
             return Err(invalid("conversion source differs from requested format"));
         }
-        if matches!(spec.from, SampleFormat::Dop { .. }) && spec.to.valid_bits() < 24 {
-            return Err(invalid("dop requires a 24-bit capable container"));
+        if let SampleFormat::I32 { valid_bits } = spec.to
+            && !(1..=32).contains(&valid_bits)
+        {
+            return Err(invalid("valid bits out of range"));
+        }
+        match (spec.from, spec.to) {
+            (SampleFormat::Dop { dsd_rate: a }, SampleFormat::Dop { dsd_rate: b }) => {
+                if a != b {
+                    return Err(invalid("dop conversion changes dsd rate"));
+                }
+            }
+            // DoP needs an integer container with at least 24 valid bits.
+            (SampleFormat::Dop { .. }, pcm) | (pcm, SampleFormat::Dop { .. })
+                if matches!(pcm, SampleFormat::F32 | SampleFormat::F64)
+                    || pcm.valid_bits() < 24 =>
+            {
+                return Err(invalid("dop requires a 24-bit capable container"));
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -133,15 +150,32 @@ fn closest_up_first(values: impl Iterator<Item = u32>, want: u32) -> Option<u32>
     above.or(below)
 }
 
+fn is_dop(format: SampleFormat) -> bool {
+    matches!(format, SampleFormat::Dop { .. })
+}
+
 /// Nearest supported (format, rate, channels) in the request's mode.
+///
+/// DoP and PCM are incompatible families and are never mixed: a DoP request
+/// only gets a DoP nearest (possibly with another `dsd_rate`) and a PCM
+/// request only a PCM one, because DoP marker words played as PCM are loud
+/// noise. Entries with empty `rates` or `channels` are ignored. Channels are
+/// taken from the chosen entry only. With no candidate the result is `None`.
 ///
 /// Order: rate (closest >= requested, else closest <), then container width
 /// (same, else closest, ties to wider), then format (same, else first listed),
 /// then channels (same, else closest >=, else closest <).
 fn nearest(req: &StreamRequest, caps: &Capabilities) -> Option<(SampleFormat, u32, u16)> {
-    let same_mode = || caps.entries.iter().filter(|e| e.mode == req.mode);
+    let same_mode = || {
+        caps.entries.iter().filter(|e| {
+            e.mode == req.mode
+                && is_dop(e.format) == is_dop(req.format)
+                && !e.rates.is_empty()
+                && !e.channels.is_empty()
+        })
+    };
     let rate = closest_up_first(same_mode().flat_map(|e| e.rates.iter().copied()), req.rate)?;
-    let at_rate = || same_mode().filter(move |e| e.rates.contains(&rate) && !e.channels.is_empty());
+    let at_rate = || same_mode().filter(move |e| e.rates.contains(&rate));
     let want_w = i16::from(req.format.container_bytes());
     let best_w = at_rate()
         .map(|e| i16::from(e.format.container_bytes()))
@@ -158,6 +192,7 @@ fn nearest(req: &StreamRequest, caps: &Capabilities) -> Option<(SampleFormat, u3
     Some((entry.format, rate, channels))
 }
 
+/// Reports the first differing cause, checked in the order rate, format, channels.
 fn downgrade_reason(req: &StreamRequest, got: (SampleFormat, u32, u16)) -> &'static str {
     if got.1 != req.rate {
         "rate not supported"

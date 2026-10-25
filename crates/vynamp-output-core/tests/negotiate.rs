@@ -475,3 +475,198 @@ fn event_display() {
         "downgraded: rate not supported (requested 48000 Hz, 2 ch; actual 44100 Hz, 2 ch)"
     );
 }
+
+const DOP: SampleFormat = SampleFormat::Dop {
+    dsd_rate: 2_822_400,
+};
+
+#[test]
+fn dop_request_never_gets_pcm_nearest() {
+    let c = caps(vec![entry(
+        ShareMode::Exclusive,
+        SampleFormat::I24Packed,
+        &[176_400],
+        &[2],
+    )]);
+    let r = request(DOP, 176_400, 2);
+    assert_eq!(
+        negotiate(&r, &c).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+    let mut r = r;
+    r.on_unavailable = OnUnavailable::Downgrade;
+    assert_eq!(
+        negotiate(&r, &c).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+}
+
+#[test]
+fn pcm_request_never_gets_dop_nearest() {
+    let c = caps(vec![entry(ShareMode::Exclusive, DOP, &[176_400], &[2])]);
+    let mut r = request(SampleFormat::I24Packed, 176_400, 2);
+    assert_eq!(
+        negotiate(&r, &c).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+    r.on_unavailable = OnUnavailable::Downgrade;
+    assert_eq!(
+        negotiate(&r, &c).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+}
+
+#[test]
+fn dop_request_may_get_dop_with_other_dsd_rate() {
+    let dsd128 = SampleFormat::Dop {
+        dsd_rate: 5_644_800,
+    };
+    let c = caps(vec![
+        entry(
+            ShareMode::Exclusive,
+            SampleFormat::I24Packed,
+            &[176_400],
+            &[2],
+        ),
+        entry(ShareMode::Exclusive, dsd128, &[352_800], &[2]),
+    ]);
+    let n = nearest_of(negotiate(&request(DOP, 176_400, 2), &c).unwrap_err());
+    assert_eq!((n.format, n.rate), (dsd128, 352_800));
+}
+
+#[test]
+fn nearest_skips_entries_with_empty_channels_or_rates() {
+    let c = caps(vec![
+        entry(ShareMode::Exclusive, SampleFormat::I16, &[48_000], &[]),
+        entry(ShareMode::Exclusive, SampleFormat::I16, &[], &[2]),
+        entry(ShareMode::Exclusive, SampleFormat::F32, &[96_000], &[2]),
+    ]);
+    let n = nearest_of(negotiate(&request(SampleFormat::I16, 44_100, 2), &c).unwrap_err());
+    assert_eq!((n.rate, n.format), (96_000, SampleFormat::F32));
+}
+
+#[test]
+fn nearest_none_when_only_empty_entries_or_no_entries() {
+    let c = caps(vec![entry(
+        ShareMode::Exclusive,
+        SampleFormat::I16,
+        &[48_000],
+        &[],
+    )]);
+    let r = request(SampleFormat::I16, 44_100, 2);
+    assert_eq!(
+        negotiate(&r, &c).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+    let c = caps(vec![entry(
+        ShareMode::Exclusive,
+        SampleFormat::I16,
+        &[],
+        &[2],
+    )]);
+    assert_eq!(
+        negotiate(&r, &c).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+    assert_eq!(
+        negotiate(&r, &caps(vec![])).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+}
+
+#[test]
+fn width_tie_prefers_wider_container() {
+    // Request I24Packed (3 bytes): I16 (2) and F32 (4) are equally far; wider wins.
+    let c = caps(vec![
+        entry(ShareMode::Exclusive, SampleFormat::I16, &[96_000], &[2]),
+        entry(ShareMode::Exclusive, SampleFormat::F32, &[96_000], &[2]),
+    ]);
+    let n = nearest_of(negotiate(&request(SampleFormat::I24Packed, 44_100, 2), &c).unwrap_err());
+    assert_eq!(n.format, SampleFormat::F32);
+}
+
+#[test]
+fn same_width_without_same_format_takes_first_listed() {
+    let msb = SampleFormat::I24In32 {
+        justify: Justify::Msb,
+    };
+    let c = caps(vec![
+        entry(ShareMode::Exclusive, msb, &[96_000], &[2]),
+        entry(ShareMode::Exclusive, SampleFormat::F32, &[96_000], &[2]),
+    ]);
+    let n = nearest_of(
+        negotiate(
+            &request(SampleFormat::I32 { valid_bits: 32 }, 44_100, 2),
+            &c,
+        )
+        .unwrap_err(),
+    );
+    assert_eq!(n.format, msb);
+}
+
+#[test]
+fn conversion_does_not_cross_modes() {
+    let c = caps(vec![entry(
+        ShareMode::Shared,
+        SampleFormat::I24Packed,
+        &[48_000],
+        &[2],
+    )]);
+    let mut r = request(SampleFormat::F32, 48_000, 2);
+    r.conversion = Conversion::Allow(ConversionSpec {
+        from: SampleFormat::F32,
+        to: SampleFormat::I24Packed,
+    });
+    assert_eq!(
+        negotiate(&r, &c).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+}
+
+#[test]
+fn invalid_conversion_targets() {
+    let conv = |from, to| {
+        let mut r = request(from, 176_400, 2);
+        r.conversion = Conversion::Allow(ConversionSpec { from, to });
+        r
+    };
+    assert_eq!(
+        invalid(&conv(
+            SampleFormat::F32,
+            SampleFormat::I32 { valid_bits: 0 }
+        )),
+        "valid bits out of range"
+    );
+    assert_eq!(
+        invalid(&conv(
+            SampleFormat::F32,
+            SampleFormat::I32 { valid_bits: 40 }
+        )),
+        "valid bits out of range"
+    );
+    assert_eq!(
+        invalid(&conv(DOP, SampleFormat::F32)),
+        "dop requires a 24-bit capable container"
+    );
+    assert_eq!(
+        invalid(&conv(DOP, SampleFormat::F64)),
+        "dop requires a 24-bit capable container"
+    );
+    assert_eq!(
+        invalid(&conv(SampleFormat::F32, DOP)),
+        "dop requires a 24-bit capable container"
+    );
+    assert_eq!(
+        invalid(&conv(SampleFormat::I16, DOP)),
+        "dop requires a 24-bit capable container"
+    );
+    assert_eq!(
+        invalid(&conv(
+            DOP,
+            SampleFormat::Dop {
+                dsd_rate: 5_644_800
+            }
+        )),
+        "dop conversion changes dsd rate"
+    );
+}
