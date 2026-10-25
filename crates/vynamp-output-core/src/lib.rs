@@ -1,6 +1,8 @@
 //! Core of vynamp-output: API types, errors, events, format negotiation,
 //! the stream state machine, the generic device-thread driver and the
-//! pure-Rust [`NullHost`].
+//! pure-Rust virtual hosts: [`NullHost`] (discards audio, real or virtual
+//! clock) and, with the `capture` feature, `CaptureHost` (records the
+//! delivered bytes and a manifest; an internal test backend).
 //!
 //! This crate is std-only and has no OS backend code. It defines what a
 //! stream request is, what a negotiated configuration looks like, how a
@@ -18,6 +20,8 @@
 //! fully silent audio thread installs its own. With `panic = "abort"`
 //! nothing can be caught.
 
+#[cfg(feature = "capture")]
+mod capture;
 mod config;
 mod convert;
 mod driver;
@@ -29,6 +33,8 @@ mod negotiate;
 mod null;
 mod render;
 mod request;
+#[cfg(feature = "capture")]
+mod ring;
 #[cfg(test)]
 mod rt_guard;
 mod rtflags;
@@ -38,11 +44,13 @@ mod watcher;
 #[cfg(test)]
 mod zero_alloc_tests;
 
+#[cfg(feature = "capture")]
+pub use capture::CaptureHost;
 pub use config::{EndpointVolume, PathProperties, RtPriority, StreamConfig, Transport, Tri};
 pub use error::Error;
 pub use event::Event;
 pub use format::{ChannelLayout, ChannelPosition, HostId, Justify, SampleFormat};
-pub use host::{DeviceInfo, Host};
+pub use host::{DeviceInfo, Host, abandoned_enumeration_threads, enumerate_with_timeout};
 pub use negotiate::{Capabilities, CapabilityEntry, CapabilityOrigin, Negotiated, negotiate};
 pub use null::{NullClock, NullHost, VirtualClockHandle, default_capability_entries};
 pub use render::{

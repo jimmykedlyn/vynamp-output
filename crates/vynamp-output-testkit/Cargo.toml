@@ -14,4 +14,5 @@ description = "Test-only helpers for vynamp-output (allocation counter, test ren
 unsafe_code = "allow"
 
 [dependencies]
-vynamp-output-core = { path = "../vynamp-output-core" }
+# `capture`: the core's Capture tests run through this dev-dependency.
+vynamp-output-core = { path = "../vynamp-output-core", features = ["capture"] }

@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "vynamp-output"
+version = "0.0.0"
+dependencies = [
+ "vynamp-output-core",
+]
+
+[[package]]
 name = "vynamp-output-core"
 version = "0.0.0"
 dependencies = [

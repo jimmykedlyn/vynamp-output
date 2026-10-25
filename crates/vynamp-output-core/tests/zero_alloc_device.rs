@@ -52,8 +52,8 @@ impl RenderSource for Alternating {
 }
 
 /// Opens on a fresh virtual clock with the allocation probe installed.
-fn start(
-    host: impl FnOnce(NullClock) -> NullHost,
+fn start<H: Host>(
+    host: impl FnOnce(NullClock) -> H,
     req: &StreamRequest,
     src: impl RenderSource,
 ) -> (VirtualClockHandle, Stream) {
@@ -140,4 +140,38 @@ fn silence_after_a_panic_does_not_allocate() {
     );
     assert_eq!(s.events().try_recv(), Ok(Event::SourcePanicked));
     s.stop().unwrap();
+}
+
+#[test]
+fn capture_ring_does_not_allocate() {
+    let path = std::env::temp_dir().join(format!(
+        "vynamp-output-zero-alloc-{}.raw",
+        std::process::id()
+    ));
+    let p = path.clone();
+    let host = move |clock| CaptureHost::new(p).with_clock(clock);
+    let src = Alternating {
+        calls: 0,
+        inner: ChannelRamp { start: 0, step: 1 },
+    };
+    let (clock, mut s) = start(host, &request(SampleFormat::I24Packed), src);
+    clock.advance(2);
+    let base = clock.tick_probe();
+    clock.advance(50);
+    assert_eq!(clock.tick_probe() - base, 0, "device thread allocated");
+    s.stop().unwrap();
+    let len = std::fs::metadata(&path).unwrap().len();
+    assert_eq!(len, 52 * u64::from(PERIOD) * 2 * 3);
+    let mut m = path.into_os_string();
+    let _ = std::fs::remove_file(&m);
+    m.push(".manifest");
+    let manifest = std::fs::read_to_string(&m).unwrap();
+    assert!(
+        manifest.ends_with(
+            "overruns=0
+"
+        ),
+        "{manifest}"
+    );
+    let _ = std::fs::remove_file(&m);
 }

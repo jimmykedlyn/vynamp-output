@@ -19,6 +19,7 @@ pub(crate) const RT_MODULES: &[&str] = &[
     "src/silence.rs",
     "src/driver.rs",
     "src/rtflags.rs",
+    "src/ring.rs",
 ];
 
 /// Tokens that must not appear in RT code.
