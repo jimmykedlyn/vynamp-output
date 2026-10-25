@@ -10,7 +10,6 @@ use crate::render::DeviceBuffer;
 /// `Dsd` buffers are left untouched for now and `dop_phase` is not advanced:
 /// the DoP idle pattern (`0x69` with alternating markers) arrives with the DoP
 /// packer in Task 6, which replaces that arm.
-#[allow(dead_code)] // consumed by the stream driver (Task 4)
 pub(crate) fn fill_silence(
     buf: &mut DeviceBuffer<'_>,
     from_frame: usize,

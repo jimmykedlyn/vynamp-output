@@ -21,7 +21,6 @@ use crate::request::ConversionSpec;
 ///
 /// Errors (`InvalidRequest`): `spec.from` not `F32`, DoP/DSD target, `dst`
 /// variant not matching `spec.to`, length mismatch, invalid `valid_bits`.
-#[allow(dead_code)] // consumed by the stream driver (Task 4)
 pub(crate) fn convert_f32_to(
     src: &[f32],
     dst: &mut DeviceBuffer<'_>,
@@ -36,7 +35,7 @@ pub(crate) fn convert_f32_to(
     if let SampleFormat::I32 { valid_bits } = spec.to
         && !(1..=32).contains(&valid_bits)
     {
-        return Err(invalid("valid_bits must be 1..=32"));
+        return Err(invalid("valid bits out of range"));
     }
     if dst.sample_count() != src.len() {
         return Err(invalid("buffer length differs from source"));
@@ -299,7 +298,7 @@ mod tests {
                     &mut DeviceBuffer::I32(&mut o32),
                     spec(SampleFormat::I32 { valid_bits })
                 ),
-                bad("valid_bits must be 1..=32")
+                bad("valid bits out of range")
             );
         }
     }

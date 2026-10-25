@@ -1,8 +1,9 @@
 //! Deterministic render sources for tests.
 //!
-//! Each source writes the same value into every channel of a frame,
-//! interleaved, for `min(ctx.frames, buffer frames)` frames. The value of a
-//! frame depends only on `ctx.device_frame_index` plus the frame offset, so
+//! Sources write interleaved samples for `min(ctx.frames, buffer frames)`
+//! frames. [`Silence`], [`Ramp`] and [`SineF32`] write the same value into
+//! every channel of a frame; [`ChannelRamp`] gives every sample its own value.
+//! Values depend only on `ctx.device_frame_index` plus the frame offset, so
 //! output is reproducible. A source panics when given a buffer variant it
 //! does not support (a test bug, not a runtime condition).
 
@@ -52,6 +53,51 @@ impl RenderSource for Silence {
     }
 }
 
+/// Writes `value(frame_offset, channel)` into each sample, mapped to the
+/// buffer type the way [`Ramp`] documents (clamp for integers, `/ 2^31` for
+/// floats). `Dsd` is not supported.
+fn fill_ints(
+    out: DeviceBuffer<'_>,
+    ch: usize,
+    n: usize,
+    value: impl Fn(u64, usize) -> i64,
+    who: &str,
+) {
+    const SCALE: f64 = 2_147_483_648.0;
+    fn put<T: Copy>(
+        out: &mut [T],
+        ch: usize,
+        n: usize,
+        value: &impl Fn(u64, usize) -> i64,
+        map: impl Fn(i64) -> T,
+    ) {
+        if ch == 0 {
+            return;
+        }
+        for (f, frame) in out.chunks_exact_mut(ch).take(n).enumerate() {
+            for (c, s) in frame.iter_mut().enumerate() {
+                *s = map(value(f as u64, c));
+            }
+        }
+    }
+    match out {
+        DeviceBuffer::F32(b) => put(b, ch, n, &value, |x| (x as f64 / SCALE) as f32),
+        DeviceBuffer::F64(b) => put(b, ch, n, &value, |x| x as f64 / SCALE),
+        DeviceBuffer::I16(b) => put(b, ch, n, &value, |x| {
+            x.clamp(i16::MIN.into(), i16::MAX.into()) as i16
+        }),
+        DeviceBuffer::I24Packed(b) => put(b, ch, n, &value, |x| {
+            let [lo, mid, hi, _] = (x.clamp(-8_388_608, 8_388_607) as i32).to_le_bytes();
+            [lo, mid, hi]
+        }),
+        DeviceBuffer::I32(b) => put(b, ch, n, &value, |x| {
+            x.clamp(i32::MIN.into(), i32::MAX.into()) as i32
+        }),
+        DeviceBuffer::U8(b) => put(b, ch, n, &value, |x| x.clamp(0, 255) as u8),
+        DeviceBuffer::Dsd(_) => panic!("{who} does not support Dsd buffers"),
+    }
+}
+
 /// Integer ramp: frame `f` carries `start + step * (device_frame_index + f)`.
 ///
 /// Integer buffers (`I16`, `I24Packed`, `I32`, `U8`) receive that integer
@@ -69,26 +115,65 @@ impl RenderSource for Ramp {
         let ch = usize::from(ctx.config.channels);
         let n = frame_count(out.sample_count(), ctx);
         let (start, step, base) = (self.start, self.step, ctx.device_frame_index);
-        let v = move |f: u64| start.wrapping_add(step.wrapping_mul(base.wrapping_add(f) as i64));
-        let clamp = |x: i64, lo: i64, hi: i64| x.clamp(lo, hi);
-        const SCALE: f64 = 2_147_483_648.0;
-        match out {
-            DeviceBuffer::F32(b) => fill(b, ch, n, |f| (v(f) as f64 / SCALE) as f32),
-            DeviceBuffer::F64(b) => fill(b, ch, n, |f| v(f) as f64 / SCALE),
-            DeviceBuffer::I16(b) => fill(b, ch, n, |f| {
-                clamp(v(f), i16::MIN.into(), i16::MAX.into()) as i16
-            }),
-            DeviceBuffer::I24Packed(b) => fill(b, ch, n, |f| {
-                let [lo, mid, hi, _] = (clamp(v(f), -8_388_608, 8_388_607) as i32).to_le_bytes();
-                [lo, mid, hi]
-            }),
-            DeviceBuffer::I32(b) => fill(b, ch, n, |f| {
-                clamp(v(f), i32::MIN.into(), i32::MAX.into()) as i32
-            }),
-            DeviceBuffer::U8(b) => fill(b, ch, n, |f| clamp(v(f), 0, 255) as u8),
-            DeviceBuffer::Dsd(_) => panic!("Ramp does not support Dsd buffers"),
-        }
+        let v = move |f: u64, _c: usize| {
+            start.wrapping_add(step.wrapping_mul(base.wrapping_add(f) as i64))
+        };
+        fill_ints(out, ch, n, v, "Ramp");
         rendered(n)
+    }
+}
+
+/// Per-channel ramp over the interleaved sample index: channel `c` of
+/// absolute frame `f` carries `start + step * (f * channels + c)`, where
+/// `f = device_frame_index + frame offset`. Every sample differs, so channel
+/// swaps, dropped and repeated samples are all detectable. Clamping and float
+/// scaling as in [`Ramp`]; `Dsd` is not supported.
+#[derive(Debug, Clone, Copy)]
+pub struct ChannelRamp {
+    pub start: i64,
+    pub step: i64,
+}
+
+impl ChannelRamp {
+    /// The integer value of channel `c` of absolute frame `f` with `channels` channels.
+    pub fn value(&self, f: u64, c: usize, channels: usize) -> i64 {
+        let index = f.wrapping_mul(channels as u64).wrapping_add(c as u64) as i64;
+        self.start.wrapping_add(self.step.wrapping_mul(index))
+    }
+}
+
+impl RenderSource for ChannelRamp {
+    fn render(&mut self, out: DeviceBuffer<'_>, ctx: &RenderContext<'_>) -> Rendered {
+        let ch = usize::from(ctx.config.channels);
+        let n = frame_count(out.sample_count(), ctx);
+        let (this, base) = (*self, ctx.device_frame_index);
+        fill_ints(
+            out,
+            ch,
+            n,
+            move |f, c| this.value(base.wrapping_add(f), c, ch),
+            "ChannelRamp",
+        );
+        rendered(n)
+    }
+}
+
+/// Renders [`ChannelRamp`] `{ start: 1, step: 1 }` content and panics on the
+/// first `render` call whose `ctx.device_frame_index >= after_frames`.
+///
+/// Stateless: the decision depends only on the device frame index, so with
+/// a period-aligned `after_frames` the panicking period is exact.
+#[derive(Debug, Clone, Copy)]
+pub struct Panics {
+    pub after_frames: u64,
+}
+
+impl RenderSource for Panics {
+    fn render(&mut self, out: DeviceBuffer<'_>, ctx: &RenderContext<'_>) -> Rendered {
+        if ctx.device_frame_index >= self.after_frames {
+            panic!("testkit Panics source: deliberate panic");
+        }
+        ChannelRamp { start: 1, step: 1 }.render(out, ctx)
     }
 }
 
@@ -268,5 +353,46 @@ mod tests {
         assert_eq!(buf[0], 5);
         let r = src.render(DeviceBuffer::I32(&mut buf), &ctx(&cfg, 4, 8));
         assert_eq!((r.frames, r.end_of_stream), (0, true));
+    }
+
+    #[test]
+    fn channel_ramp_uses_the_interleaved_index() {
+        let cfg = config(2);
+        let mut src = ChannelRamp { start: 10, step: 3 };
+        let mut i = [0i32; 6];
+        let r = src.render(DeviceBuffer::I32(&mut i), &ctx(&cfg, 3, 4));
+        // frame 4 starts at interleaved index 8
+        assert_eq!((i, r.frames), ([34, 37, 40, 43, 46, 49], 3));
+        let mut p = [[0u8; 3]; 2];
+        ChannelRamp { start: -2, step: 1 }
+            .render(DeviceBuffer::I24Packed(&mut p), &ctx(&cfg, 1, 0));
+        assert_eq!(p, [[0xFE, 0xFF, 0xFF], [0xFF, 0xFF, 0xFF]]);
+        let mut c = [0i16; 2];
+        ChannelRamp {
+            start: 40_000,
+            step: -80_000,
+        }
+        .render(DeviceBuffer::I16(&mut c), &ctx(&cfg, 1, 0));
+        assert_eq!(c, [i16::MAX, i16::MIN]);
+        let mut f = [0f32; 2];
+        ChannelRamp {
+            start: 1 << 30,
+            step: 1 << 29,
+        }
+        .render(DeviceBuffer::F32(&mut f), &ctx(&cfg, 1, 0));
+        assert_eq!(f, [0.5, 0.75]);
+    }
+
+    #[test]
+    fn panics_source_renders_then_panics() {
+        let cfg = config(1);
+        let mut src = Panics { after_frames: 4 };
+        let mut b = [0i32; 4];
+        let r = src.render(DeviceBuffer::I32(&mut b), &ctx(&cfg, 4, 0));
+        assert_eq!((b, r.frames), ([1, 2, 3, 4], 4));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            src.render(DeviceBuffer::I32(&mut b), &ctx(&cfg, 4, 4))
+        }));
+        assert!(caught.is_err());
     }
 }
