@@ -10,3 +10,6 @@ description = "Core API types, errors, events and format negotiation for vynamp-
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+vynamp-output-testkit = { path = "../vynamp-output-testkit" }

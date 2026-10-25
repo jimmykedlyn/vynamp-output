@@ -5,7 +5,13 @@ version = 4
 [[package]]
 name = "vynamp-output-core"
 version = "0.0.0"
+dependencies = [
+ "vynamp-output-testkit",
+]
 
 [[package]]
 name = "vynamp-output-testkit"
 version = "0.0.0"
+dependencies = [
+ "vynamp-output-core",
+]

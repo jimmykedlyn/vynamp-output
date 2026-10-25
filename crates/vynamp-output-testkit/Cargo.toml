@@ -12,3 +12,6 @@ description = "Test-only helpers for vynamp-output (allocation counter, test ren
 # `unsafe impl GlobalAlloc`. This crate is test-only and never published.
 [lints.rust]
 unsafe_code = "allow"
+
+[dependencies]
+vynamp-output-core = { path = "../vynamp-output-core" }
