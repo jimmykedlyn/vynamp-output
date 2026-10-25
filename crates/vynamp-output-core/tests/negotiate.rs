@@ -696,3 +696,37 @@ fn pcm_to_dop_always_rejected_and_dop_repack_allowed() {
         assert_eq!(n.config_template.path.library_conversion, Some(spec));
     }
 }
+
+#[test]
+fn dop_to_narrow_integer_target_rejected() {
+    for to in [
+        SampleFormat::I16,
+        SampleFormat::U8,
+        SampleFormat::I32 { valid_bits: 20 },
+    ] {
+        let mut r = request(DOP, 176_400, 2);
+        r.conversion = Conversion::Allow(ConversionSpec { from: DOP, to });
+        assert_eq!(invalid(&r), "dop requires a 24-bit capable container");
+    }
+}
+
+#[test]
+fn exact_format_only_in_other_mode_is_not_matched_or_converted() {
+    // Exact F32 exists only in Shared; Exclusive has nothing usable for the conversion.
+    let c = caps(vec![entry(
+        ShareMode::Shared,
+        SampleFormat::F32,
+        &[48_000],
+        &[2],
+    )]);
+    let mut r = request(SampleFormat::F32, 48_000, 2);
+    r.mode = ShareMode::Exclusive;
+    r.conversion = Conversion::Allow(ConversionSpec {
+        from: SampleFormat::F32,
+        to: SampleFormat::I16,
+    });
+    assert_eq!(
+        negotiate(&r, &c).unwrap_err(),
+        Error::FormatUnsupported { nearest: None }
+    );
+}
