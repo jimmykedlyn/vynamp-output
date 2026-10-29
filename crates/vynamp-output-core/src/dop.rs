@@ -35,9 +35,13 @@ pub fn dop_pcm_rate(dsd_rate: u32) -> Option<u32> {
     (dsd_rate != 0 && dsd_rate.is_multiple_of(16)).then_some(dsd_rate / 16)
 }
 
-/// Whether a path may carry DoP: the OS mixer must be bypassed (a mixer turns
-/// DoP into noise), no library conversion, endpoint volume unity or unknown.
-pub(crate) fn check_path(path: &PathProperties) -> Result<(), Error> {
+/// Whether a path may carry DoP, for any backend to call at open: the OS
+/// mixer must be bypassed (a mixer turns DoP into noise:
+/// `ExclusiveUnavailable`), endpoint volume unity or unknown
+/// (`NotUnity` is `ExclusiveUnavailable`; with `Unknown` the stream opens
+/// and the backend emits [`Event::DopVolumeUnverified`](crate::Event::DopVolumeUnverified)),
+/// and no library conversion (`FormatUnsupported`).
+pub fn check_dop_path(path: &PathProperties) -> Result<(), Error> {
     if path.os_mixer_bypassed != Tri::Yes {
         return Err(Error::ExclusiveUnavailable {
             reason: "dop requires a path that bypasses the os mixer",
@@ -228,6 +232,25 @@ mod tests {
     }
 
     #[test]
+    fn dsd_bytes_per_frame_comes_from_the_format() {
+        assert_eq!(DOP.dsd_bytes_per_frame(), Some(2));
+        assert_eq!(
+            SampleFormat::I32 { valid_bits: 24 }.dsd_bytes_per_frame(),
+            None
+        );
+        // a Dsd buffer with a non-DSD format is filled entirely (never stale)
+        let mut b = [0x12u8; 4];
+        fill_silence(
+            &mut DeviceBuffer::Dsd(&mut b),
+            1,
+            1,
+            SampleFormat::I16,
+            &mut false,
+        );
+        assert_eq!(b, [IDLE; 4]);
+    }
+
+    #[test]
     fn pcm_rate_mapping() {
         assert_eq!(dop_pcm_rate(2_822_400), Some(176_400));
         assert_eq!(dop_pcm_rate(5_644_800), Some(352_800));
@@ -276,15 +299,21 @@ mod tests {
 
     #[test]
     fn path_check() {
-        assert_eq!(check_path(&path(Tri::Yes, EndpointVolume::Unity)), Ok(()));
-        assert_eq!(check_path(&path(Tri::Yes, EndpointVolume::Unknown)), Ok(()));
+        assert_eq!(
+            check_dop_path(&path(Tri::Yes, EndpointVolume::Unity)),
+            Ok(())
+        );
+        assert_eq!(
+            check_dop_path(&path(Tri::Yes, EndpointVolume::Unknown)),
+            Ok(())
+        );
         for p in [
             path(Tri::No, EndpointVolume::Unity),
             path(Tri::Unknown, EndpointVolume::Unity),
             path(Tri::Yes, EndpointVolume::NotUnity(0.5)),
         ] {
             assert!(
-                matches!(check_path(&p), Err(Error::ExclusiveUnavailable { .. })),
+                matches!(check_dop_path(&p), Err(Error::ExclusiveUnavailable { .. })),
                 "{p:?}"
             );
         }
@@ -294,7 +323,7 @@ mod tests {
             to: SampleFormat::I24Packed,
         });
         assert_eq!(
-            check_path(&p),
+            check_dop_path(&p),
             Err(Error::FormatUnsupported { nearest: None })
         );
     }

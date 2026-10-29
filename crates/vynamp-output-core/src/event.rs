@@ -31,6 +31,10 @@ pub enum Event {
     RtPriorityDenied {
         reason: &'static str,
     },
+    /// A DoP stream opened while the endpoint volume is unknown: if it is not
+    /// unity, the DAC receives noise instead of DSD. Emitted at open, before
+    /// the first callback.
+    DopVolumeUnverified,
 }
 
 fn role_name(role: Role) -> &'static str {
@@ -66,6 +70,7 @@ impl fmt::Display for Event {
             Event::RtPriorityDenied { reason } => {
                 write!(f, "realtime priority denied: {reason}")
             }
+            Event::DopVolumeUnverified => f.write_str("dop opened with unverified endpoint volume"),
         }
     }
 }

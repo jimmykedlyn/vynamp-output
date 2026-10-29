@@ -1,6 +1,6 @@
 //! Format-correct silence for the unfilled tail of a device buffer.
 
-use crate::dop::{BYTES_PER_FRAME, IDLE, fill_idle};
+use crate::dop::{IDLE, fill_idle};
 use crate::format::SampleFormat;
 use crate::render::DeviceBuffer;
 
@@ -8,8 +8,9 @@ use crate::render::DeviceBuffer;
 ///
 /// PCM writes 0, `U8` writes `0x80`. A `from_frame` past the end is a no-op.
 ///
-/// DoP: a `Dsd` buffer (the source's DSD bytes, `2 * channels` per frame)
-/// gets the idle byte `0x69` and `dop_phase` is left alone, because the
+/// DoP: a `Dsd` buffer (the source's DSD bytes,
+/// `format.dsd_bytes_per_frame() * channels` per frame) gets the idle byte
+/// `0x69` and `dop_phase` is left alone, because the
 /// packer advances it when it packs the period. A PCM container with
 /// `format` `Dop` (`I24Packed`/`I32`) gets idle DoP words whose markers
 /// continue from `dop_phase`, advancing it per frame.
@@ -34,7 +35,12 @@ pub(crate) fn fill_silence(
         DeviceBuffer::I24Packed(b) => tail(b, start, [0; 3]),
         DeviceBuffer::I32(b) => tail(b, start, 0),
         DeviceBuffer::U8(b) => tail(b, start, 0x80),
-        DeviceBuffer::Dsd(b) => tail(b, start.saturating_mul(BYTES_PER_FRAME), IDLE),
+        // bytes per frame from the format; a non-DSD format here is a
+        // mismatch: idle the whole buffer rather than leave stale bytes
+        DeviceBuffer::Dsd(b) => match format.dsd_bytes_per_frame() {
+            Some(n) => tail(b, start.saturating_mul(n), IDLE),
+            None => b.fill(IDLE),
+        },
     }
 }
 

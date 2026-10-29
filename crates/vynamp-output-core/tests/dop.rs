@@ -1,8 +1,13 @@
 //! DoP end to end: the Capture host records the packed 24-bit words exactly
 //! as the device thread delivered them (I32, MSB-justified, little-endian),
 //! with the 0x05/0xFA marker continuous across periods, underrun and
-//! silence; opening DoP is refused on a mixed path or with a library
-//! conversion.
+//! silence; opening DoP is refused on a mixed or shared path or with a
+//! library conversion.
+//!
+//! End-to-end coverage uses the I32 container (the Null/Capture DoP
+//! container); the I24Packed container is covered at unit level (`dop.rs`)
+//! and through the driver (`driver.rs`). The period is odd, so a marker
+//! phase reset at a period boundary would be caught.
 
 use std::path::PathBuf;
 
@@ -10,7 +15,7 @@ use vynamp_output_core::*;
 
 const DSD64: u32 = 2_822_400;
 const DOP64: SampleFormat = SampleFormat::Dop { dsd_rate: DSD64 };
-const PERIOD: u32 = 8;
+const PERIOD: u32 = 7;
 const CHANNELS: u16 = 2;
 /// Call index whose render is short (underrun), and its frame count.
 const SHORT_CALL: u64 = 1;
@@ -142,7 +147,7 @@ fn markers_continue_across_periods_and_an_underrun() {
     assert_eq!(
         manifest,
         "format=Dop2822400\ncontainer_bytes=4\nvalid_bits=24\nbyte_order=little\n\
-         rate=176400\nchannels=2\nperiod_frames=8\nframes=24\noverruns=0\n"
+         rate=176400\nchannels=2\nperiod_frames=7\nframes=21\noverruns=0\n"
     );
 }
 
@@ -229,11 +234,83 @@ fn refused_when_endpoint_volume_is_not_unity() {
         .open(&request(DOP64, 176_400), Box::new(EndsAtOnce))
         .unwrap_err();
     assert!(matches!(e, Error::ExclusiveUnavailable { .. }), "{e:?}");
+}
+
+#[test]
+fn unknown_endpoint_volume_opens_with_a_warning() {
     let mut s = NullHost::new(NullClock::Real)
         .with_endpoint_volume(EndpointVolume::Unknown)
         .open(&request(DOP64, 176_400), Box::new(EndsAtOnce))
         .unwrap();
     assert_eq!(s.config().path.endpoint_volume, EndpointVolume::Unknown);
+    // queued at open, before the first callback
+    assert_eq!(s.events().try_recv(), Ok(Event::DopVolumeUnverified));
+    assert!(s.events().try_recv().is_err());
+    s.stop().unwrap();
+    // unity volume: no warning
+    let mut s = NullHost::new(NullClock::Real)
+        .open(&request(DOP64, 176_400), Box::new(EndsAtOnce))
+        .unwrap();
+    assert!(s.events().try_recv().is_err());
+    s.stop().unwrap();
+}
+
+#[test]
+fn refused_on_a_shared_path() {
+    let shared_dop = vec![CapabilityEntry {
+        mode: ShareMode::Shared,
+        format: DOP64,
+        rates: vec![176_400],
+        channels: vec![2],
+        origin: CapabilityOrigin::Advertised,
+    }];
+    let mut req = request(DOP64, 176_400);
+    req.mode = ShareMode::Shared;
+    let e = NullHost::with_capabilities(NullClock::Real, shared_dop.clone())
+        .open(&req, Box::new(EndsAtOnce))
+        .unwrap_err();
+    assert!(matches!(e, Error::ExclusiveUnavailable { .. }), "{e:?}");
+    let e = CaptureHost::with_capabilities(temp_path("shared"), shared_dop)
+        .open(&req, Box::new(EndsAtOnce))
+        .unwrap_err();
+    assert!(matches!(e, Error::ExclusiveUnavailable { .. }), "{e:?}");
+    // a shared virtual stream reports the mixer as not bypassed
+    let mut pcm = request(SampleFormat::I16, 48_000);
+    pcm.mode = ShareMode::Shared;
+    let mut s = NullHost::new(NullClock::Real)
+        .open(&pcm, Box::new(EndsAtOnce))
+        .unwrap();
+    assert_eq!(s.config().path.os_mixer_bypassed, Tri::No);
+    s.stop().unwrap();
+}
+
+#[test]
+fn dsd128_downgrades_to_dsd64_on_a_dsd64_only_device() {
+    let dsd64_only = vec![CapabilityEntry {
+        mode: ShareMode::Exclusive,
+        format: DOP64,
+        rates: vec![176_400],
+        channels: vec![2],
+        origin: CapabilityOrigin::Advertised,
+    }];
+    let mut req = request(
+        SampleFormat::Dop {
+            dsd_rate: 5_644_800,
+        },
+        352_800,
+    );
+    req.on_unavailable = OnUnavailable::Downgrade;
+    let mut s = NullHost::with_capabilities(NullClock::Real, dsd64_only)
+        .open(&req, Box::new(EndsAtOnce))
+        .unwrap();
+    assert_eq!((s.config().format, s.config().rate), (DOP64, 176_400));
+    match s.events().try_recv() {
+        Ok(Event::Downgraded { actual, reason, .. }) => {
+            assert_eq!(reason, "rate not supported");
+            assert_eq!((actual.format, actual.rate), (DOP64, 176_400));
+        }
+        other => panic!("expected Downgraded, got {other:?}"),
+    }
     s.stop().unwrap();
 }
 

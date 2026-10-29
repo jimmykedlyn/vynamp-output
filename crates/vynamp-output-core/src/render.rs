@@ -12,6 +12,9 @@ pub trait RenderSource: Send + 'static {
     /// Fill `out` (interleaved, in the stream's real format) with up to
     /// `ctx.frames` frames and report how many were written. The library
     /// fills the remainder with the format's silence; it never repeats samples.
+    ///
+    /// For a DoP stream `out` is [`DeviceBuffer::Dsd`] (raw DSD bytes, layout
+    /// documented there) and frames are DoP (PCM carrier) frames.
     fn render(&mut self, out: DeviceBuffer<'_>, ctx: &RenderContext<'_>) -> Rendered;
 }
 
@@ -27,12 +30,20 @@ pub enum DeviceBuffer<'a> {
     I32(&'a mut [i32]),
     /// Unsigned 8-bit, midpoint `0x80`.
     U8(&'a mut [u8]),
-    /// Raw DSD bytes (packed into DoP by the library).
+    /// Raw DSD bytes, packed into DoP by the library.
+    ///
+    /// Per DoP frame (one frame at the PCM carrier rate `dsd_rate / 16`):
+    /// 2 bytes per channel, grouped by channel (`[c0 first, c0 second, c1
+    /// first, c1 second, …]`), each channel's bytes in time order. Within a
+    /// byte the MSB is the earliest DSD bit (DFF order); sources reading DSF
+    /// (LSB first) must bit-reverse each byte. The idle (silence) byte is
+    /// `0x69`.
     Dsd(&'a mut [u8]),
 }
 
 impl DeviceBuffer<'_> {
-    /// Number of samples (all channels) in the buffer.
+    /// Number of samples (all channels) in the buffer; for `Dsd`, the number
+    /// of bytes (2 per channel per frame for DoP).
     pub fn sample_count(&self) -> usize {
         match self {
             DeviceBuffer::F32(b) => b.len(),
@@ -48,7 +59,8 @@ impl DeviceBuffer<'_> {
 /// What the source is being asked to render.
 #[derive(Debug, Clone, Copy)]
 pub struct RenderContext<'a> {
-    /// Frames requested for this call.
+    /// Frames requested for this call (DoP: carrier frames, each holding 2
+    /// DSD bytes per channel).
     pub frames: u32,
     /// Monotonic count of all frames delivered to the device so far (content + silence).
     pub device_frame_index: u64,
@@ -59,7 +71,8 @@ pub struct RenderContext<'a> {
 /// Result of one `render` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rendered {
-    /// Frames actually written (the rest is filled with silence).
+    /// Frames actually written (the rest is filled with silence); counted
+    /// like [`RenderContext::frames`].
     pub frames: u32,
     pub end_of_stream: bool,
 }

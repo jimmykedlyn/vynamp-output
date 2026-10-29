@@ -185,7 +185,8 @@ impl CaptureHost {
         self
     }
 
-    /// Reports `os_mixer_bypassed` on opened streams (default `Yes`), e.g.
+    /// Reports `os_mixer_bypassed` on opened exclusive streams (default
+    /// `Yes`; shared streams always report `No`), e.g.
     /// `No` to model a mixed path, where DoP is refused.
     pub fn with_os_mixer_bypassed(mut self, bypassed: Tri) -> Self {
         self.device.os_mixer_bypassed = bypassed;

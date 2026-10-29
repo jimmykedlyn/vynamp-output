@@ -85,6 +85,17 @@ impl SampleFormat {
         }
     }
 
+    /// DSD bytes per channel per frame in the source's
+    /// [`DeviceBuffer::Dsd`](crate::DeviceBuffer::Dsd) buffer: `Dop` 2 (16
+    /// DSD bits per carrier frame), `None` for PCM formats. A native DSD
+    /// format (DSD_U8/U16/U32) adds its own width here.
+    pub fn dsd_bytes_per_frame(self) -> Option<usize> {
+        match self {
+            SampleFormat::Dop { .. } => Some(2),
+            _ => None,
+        }
+    }
+
     /// Meaningful bits of the format (`F32` 32, `F64` 64, `Dop` 24).
     pub fn valid_bits(self) -> u8 {
         match self {

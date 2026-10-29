@@ -15,7 +15,7 @@ use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
 use crate::config::{EndpointVolume, PathProperties, RtPriority, StreamConfig, Transport, Tri};
-use crate::dop::{self, dop_pcm_rate};
+use crate::dop::{self, check_dop_path, dop_pcm_rate};
 use crate::driver::{Driver, NativeBuf, PeriodClock, PeriodSink, Pipeline, run_device_thread};
 use crate::error::Error;
 use crate::event::Event;
@@ -378,9 +378,10 @@ impl VirtualDevice {
     /// buffer = 2 periods, virtual path properties. Returns the config and
     /// the downgrade reason, if any.
     ///
-    /// DoP needs a path that carries it unaltered (`dop::check_path`): a
-    /// mixed path or non-unity volume is `ExclusiveUnavailable`, a library
-    /// conversion from DoP `FormatUnsupported`.
+    /// A shared stream reports `os_mixer_bypassed: No` (a shared endpoint is
+    /// a mixed path). DoP needs a path that carries it unaltered
+    /// ([`check_dop_path`]): a mixed path or non-unity volume is
+    /// `ExclusiveUnavailable`.
     pub(crate) fn prepare(
         &self,
         req: &StreamRequest,
@@ -392,9 +393,6 @@ impl VirtualDevice {
         }
         let n = negotiate(req, &self.caps)?;
         let mut config = n.config_template;
-        if is_dop(req.format) && config.path.library_conversion.is_some() {
-            return Err(Error::FormatUnsupported { nearest: None });
-        }
         if let Some(spec) = config.path.library_conversion
             && spec.from != SampleFormat::F32
         {
@@ -424,7 +422,10 @@ impl VirtualDevice {
         config.buffer_frames = 2 * period as u32;
         let conversion = config.path.library_conversion;
         config.path = PathProperties {
-            os_mixer_bypassed: self.os_mixer_bypassed,
+            os_mixer_bypassed: match config.mode {
+                ShareMode::Shared => Tri::No,
+                ShareMode::Exclusive => self.os_mixer_bypassed,
+            },
             os_resampling: false,
             library_conversion: conversion,
             endpoint_volume: self.endpoint_volume,
@@ -432,7 +433,7 @@ impl VirtualDevice {
             rt_priority: RtPriority::Denied("virtual device: no real-time priority requested"),
         };
         if is_dop(config.format) {
-            dop::check_path(&config.path)?;
+            check_dop_path(&config.path)?;
         }
         Ok((config, n.downgraded))
     }
@@ -490,6 +491,9 @@ pub(crate) fn launch<K: PeriodSink>(
             actual: Box::new(config.clone()),
             reason,
         });
+    }
+    if is_dop(config.format) && config.path.endpoint_volume == EndpointVolume::Unknown {
+        let _ = tx.send(Event::DopVolumeUnverified);
     }
     let samples = config.period_frames as usize * usize::from(config.channels);
     let native = native_buffer(config.format, samples);
@@ -609,7 +613,8 @@ impl NullHost {
         }
     }
 
-    /// Reports `os_mixer_bypassed` on opened streams (default `Yes`), e.g.
+    /// Reports `os_mixer_bypassed` on opened exclusive streams (default
+    /// `Yes`; shared streams always report `No`), e.g.
     /// `No` to model a mixed path, where DoP is refused.
     pub fn with_os_mixer_bypassed(mut self, bypassed: Tri) -> Self {
         self.device.os_mixer_bypassed = bypassed;

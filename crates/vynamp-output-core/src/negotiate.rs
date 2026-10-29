@@ -218,7 +218,8 @@ fn downgrade_reason(req: &StreamRequest, got: (SampleFormat, u32, u16)) -> &'sta
 /// 1. Exact match (mode, format, rate, channels) gives the config as asked.
 /// 2. Else, with `Conversion::Allow(spec)` and the device supporting
 ///    `spec.to` at the requested rate and channels, opens in `spec.to` and
-///    records the conversion in `path.library_conversion`.
+///    records the conversion in `path.library_conversion`. A conversion
+///    from DoP to PCM is never applied (DoP needs an unaltered path).
 /// 3. Else the nearest configuration: returned in the error as
 ///    [`Error::FormatUnsupported`] by default, or as a successful downgrade
 ///    (with a reason) when `OnUnavailable::Downgrade` was requested.
@@ -236,7 +237,10 @@ pub fn negotiate(req: &StreamRequest, caps: &Capabilities) -> Result<Negotiated,
             downgraded: None,
         });
     }
+    // DoP must reach the device unaltered (spec §5.9): a DoP -> PCM repack
+    // would be a library conversion on the DoP path, so it is never applied.
     if let Conversion::Allow(spec) = req.conversion
+        && !(is_dop(spec.from) && !is_dop(spec.to))
         && exact(spec.to)
     {
         return Ok(Negotiated {

@@ -48,7 +48,7 @@ mod zero_alloc_tests;
 #[cfg(feature = "capture")]
 pub use capture::CaptureHost;
 pub use config::{EndpointVolume, PathProperties, RtPriority, StreamConfig, Transport, Tri};
-pub use dop::dop_pcm_rate;
+pub use dop::{check_dop_path, dop_pcm_rate};
 pub use error::Error;
 pub use event::Event;
 pub use format::{ChannelLayout, ChannelPosition, HostId, Justify, SampleFormat};

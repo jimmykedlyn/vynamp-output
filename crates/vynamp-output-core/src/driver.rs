@@ -494,7 +494,7 @@ mod tests {
             }
             self.0 += 1;
             Rendered {
-                frames: if self.0 == 1 { P } else { 1 },
+                frames: if self.0 == 1 { ctx.frames } else { 1 },
                 end_of_stream: false,
             }
         }
@@ -505,17 +505,21 @@ mod tests {
         let flags = Arc::new(RtFlags::new());
         flags.state.store(ST_RUNNING, Ordering::Relaxed);
         let rec = Record::default();
+        // odd period: a phase reset per period would repeat 0x05 at frame 5
+        const DP: u32 = 5;
+        let mut cfg = config(SampleFormat::Dop {
+            dsd_rate: 2_822_400,
+        });
+        cfg.period_frames = DP;
         let d = Driver::new(
             Ticks(2),
             rec.clone(),
             Box::new(DsdCount(0)),
             flags.clone(),
-            config(SampleFormat::Dop {
-                dsd_rate: 2_822_400,
-            }),
-            NativeBuf::I24Packed(vec![[0; 3]; P as usize].into_boxed_slice()),
+            cfg,
+            NativeBuf::I24Packed(vec![[0; 3]; DP as usize].into_boxed_slice()),
             Pipeline::Dop {
-                scratch: vec![0; 2 * P as usize].into_boxed_slice(),
+                scratch: vec![0; 2 * DP as usize].into_boxed_slice(),
             },
             0,
         );
@@ -524,8 +528,8 @@ mod tests {
         assert_eq!(
             p,
             vec![
-                vec![0x05_0001, 0xFA_0203, 0x05_0405, 0xFA_0607],
-                vec![0x05_0809, 0xFA_6969, 0x05_6969, 0xFA_6969]
+                vec![0x05_0001, 0xFA_0203, 0x05_0405, 0xFA_0607, 0x05_0809],
+                vec![0xFA_0A0B, 0x05_6969, 0xFA_6969, 0x05_6969, 0xFA_6969]
             ]
         );
         assert_eq!(flags.source_underruns.load(Ordering::Relaxed), 1);

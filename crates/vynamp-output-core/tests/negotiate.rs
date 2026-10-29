@@ -453,6 +453,10 @@ fn event_display() {
     );
     assert_eq!(Event::SourcePanicked.to_string(), "source panicked");
     assert_eq!(
+        Event::DopVolumeUnverified.to_string(),
+        "dop opened with unverified endpoint volume"
+    );
+    assert_eq!(
         Event::RtPriorityDenied { reason: "no perm" }.to_string(),
         "realtime priority denied: no perm"
     );
@@ -672,7 +676,7 @@ fn invalid_conversion_targets() {
 }
 
 #[test]
-fn pcm_to_dop_always_rejected_and_dop_repack_allowed() {
+fn pcm_to_dop_always_rejected_and_dop_to_pcm_never_converted() {
     let mut r = request(SampleFormat::I24Packed, 176_400, 2);
     r.conversion = Conversion::Allow(ConversionSpec {
         from: SampleFormat::I24Packed,
@@ -691,9 +695,12 @@ fn pcm_to_dop_always_rejected_and_dop_repack_allowed() {
         let mut r = request(DOP, 176_400, 2);
         let spec = ConversionSpec { from: DOP, to };
         r.conversion = Conversion::Allow(spec);
-        let n = negotiate(&r, &c).unwrap();
-        assert_eq!(n.config_template.format, to);
-        assert_eq!(n.config_template.path.library_conversion, Some(spec));
+        // DoP must reach the device unaltered: no library conversion
+        assert_eq!(
+            negotiate(&r, &c).unwrap_err(),
+            Error::FormatUnsupported { nearest: None },
+            "{to:?}"
+        );
     }
 }
 
