@@ -592,6 +592,17 @@ pub(crate) fn launch<K: PeriodSink>(
 }
 
 /// A host with one virtual output device (`"null"`) that discards audio.
+///
+/// ```
+/// use vynamp_output_core::*;
+///
+/// let host = NullHost::new(NullClock::Real);
+/// let devices = host.enumerate().unwrap();
+/// assert_eq!(devices.len(), 1);
+/// assert_eq!(devices[0].host, HostId::Null);
+/// let caps = host.capabilities(&devices[0].id, ShareMode::Exclusive).unwrap();
+/// assert!(!caps.entries.is_empty());
+/// ```
 #[derive(Debug, Clone)]
 pub struct NullHost {
     clock: NullClock,

@@ -31,6 +31,14 @@ pub(crate) const BYTES_PER_FRAME: usize = 2;
 
 /// PCM carrier rate of DoP for a DSD bit rate: `dsd_rate / 16`, or `None`
 /// when `dsd_rate` is zero or not a multiple of 16.
+///
+/// ```
+/// use vynamp_output_core::dop_pcm_rate;
+///
+/// assert_eq!(dop_pcm_rate(2_822_400), Some(176_400)); // DSD64
+/// assert_eq!(dop_pcm_rate(5_644_800), Some(352_800)); // DSD128
+/// assert_eq!(dop_pcm_rate(0), None);
+/// ```
 pub fn dop_pcm_rate(dsd_rate: u32) -> Option<u32> {
     (dsd_rate != 0 && dsd_rate.is_multiple_of(16)).then_some(dsd_rate / 16)
 }

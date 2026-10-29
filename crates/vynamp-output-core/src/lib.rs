@@ -41,6 +41,7 @@ mod rt_guard;
 mod rtflags;
 mod silence;
 mod stream;
+mod support;
 mod watcher;
 #[cfg(test)]
 mod zero_alloc_tests;
@@ -64,3 +65,4 @@ pub use request::{
     OnUnavailable, Role, ShareMode, StreamRequest,
 };
 pub use stream::{Counters, DrainOutcome, Stream, StreamState};
+pub use support::{Feature, VerificationLevel, support};
