@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use vynamp_output_core::*;
-use vynamp_output_testkit::source::{ChannelRamp, SineF32};
+use vynamp_output_testkit::source::{ChannelRamp, Silence, SineF32};
 
 fn request(rate: u32, buffer: BufferRequest) -> StreamRequest {
     StreamRequest {
@@ -169,7 +169,7 @@ fn downgrade_event_comes_before_the_first_callback() {
 }
 
 #[test]
-fn dop_is_refused_until_the_packer_exists() {
+fn dop_opens_on_an_advertised_dop_entry() {
     let dop = SampleFormat::Dop {
         dsd_rate: 2_822_400,
     };
@@ -185,12 +185,9 @@ fn dop_is_refused_until_the_packer_exists() {
     );
     let mut req = request(176_400, BufferRequest::BackendDefault);
     req.format = dop;
-    assert_eq!(
-        host.open(&req, ramp()).err(),
-        Some(Error::InvalidRequest {
-            what: "dop is not supported by this host yet"
-        })
-    );
+    let mut s = host.open(&req, Box::new(Silence)).expect("open DoP");
+    assert_eq!((s.config().format, s.config().rate), (dop, 176_400));
+    s.stop().unwrap();
 }
 
 #[test]

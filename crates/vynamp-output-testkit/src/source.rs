@@ -32,7 +32,8 @@ fn rendered(frames: usize) -> Rendered {
     }
 }
 
-/// Renders digital silence in every buffer variant (PCM 0, `U8` 0x80, DSD idle 0x69).
+/// Renders digital silence in every buffer variant (PCM 0, `U8` 0x80, DSD idle
+/// 0x69, two bytes per channel per frame).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Silence;
 
@@ -47,7 +48,12 @@ impl RenderSource for Silence {
             DeviceBuffer::I24Packed(b) => fill(b, ch, n, |_| [0; 3]),
             DeviceBuffer::I32(b) => fill(b, ch, n, |_| 0),
             DeviceBuffer::U8(b) => fill(b, ch, n, |_| 0x80),
-            DeviceBuffer::Dsd(b) => fill(b, ch, n, |_| 0x69),
+            DeviceBuffer::Dsd(b) => {
+                // DSD frames hold 2 bytes per channel (DoP layout)
+                let n = frame_count(b.len() / 2, ctx);
+                fill(b, 2 * ch, n, |_| 0x69);
+                return rendered(n);
+            }
         }
         rendered(n)
     }
@@ -291,6 +297,16 @@ mod tests {
         // buffer holds 3 frames; only the 2 requested are written
         let r = Silence.render(DeviceBuffer::U8(&mut u), &ctx(&cfg, 2, 0));
         assert_eq!((u, r.frames), ([0x80, 0x80, 0x80, 0x80, 0, 0], 2));
+        // DSD: 2 bytes per channel per frame; buffer of 3 frames, 2 requested
+        let mut d = [0u8; 12];
+        let r = Silence.render(DeviceBuffer::Dsd(&mut d), &ctx(&cfg, 2, 0));
+        assert_eq!(
+            (d, r.frames),
+            (
+                [0x69, 0x69, 0x69, 0x69, 0x69, 0x69, 0x69, 0x69, 0, 0, 0, 0],
+                2
+            )
+        );
     }
 
     #[test]

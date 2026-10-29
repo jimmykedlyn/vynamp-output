@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use crate::config::StreamConfig;
+use crate::config::{EndpointVolume, StreamConfig, Tri};
 use crate::error::Error;
 use crate::format::{HostId, Justify, SampleFormat};
 use crate::host::{DeviceInfo, Host};
@@ -182,6 +182,20 @@ impl CaptureHost {
     /// Paces the device with `clock` (e.g. a virtual clock in tests).
     pub fn with_clock(mut self, clock: NullClock) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Reports `os_mixer_bypassed` on opened streams (default `Yes`), e.g.
+    /// `No` to model a mixed path, where DoP is refused.
+    pub fn with_os_mixer_bypassed(mut self, bypassed: Tri) -> Self {
+        self.device.os_mixer_bypassed = bypassed;
+        self
+    }
+
+    /// Reports `endpoint_volume` on opened streams (default `Unity`); DoP is
+    /// refused with `NotUnity`.
+    pub fn with_endpoint_volume(mut self, volume: EndpointVolume) -> Self {
+        self.device.endpoint_volume = volume;
         self
     }
 }

@@ -1,6 +1,7 @@
 //! Matching a request against device capabilities.
 
 use crate::config::{PathProperties, StreamConfig};
+use crate::dop::dop_pcm_rate;
 use crate::error::Error;
 use crate::format::HostId;
 use crate::format::{ChannelLayout, SampleFormat};
@@ -62,8 +63,13 @@ fn validate(req: &StreamRequest) -> Result<(), Error> {
     {
         return Err(invalid("valid bits out of range"));
     }
-    if let SampleFormat::Dop { dsd_rate: 0 } = req.format {
-        return Err(invalid("dsd rate is zero"));
+    if let SampleFormat::Dop { dsd_rate } = req.format {
+        if dsd_rate == 0 {
+            return Err(invalid("dsd rate is zero"));
+        }
+        if dop_pcm_rate(dsd_rate) != Some(req.rate) {
+            return Err(invalid("dop rate differs from dsd rate / 16"));
+        }
     }
     if let Conversion::Allow(spec) = req.conversion {
         if spec.from != req.format {

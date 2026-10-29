@@ -1,5 +1,6 @@
 //! Format-correct silence for the unfilled tail of a device buffer.
 
+use crate::dop::{BYTES_PER_FRAME, IDLE, fill_idle};
 use crate::format::SampleFormat;
 use crate::render::DeviceBuffer;
 
@@ -7,9 +8,11 @@ use crate::render::DeviceBuffer;
 ///
 /// PCM writes 0, `U8` writes `0x80`. A `from_frame` past the end is a no-op.
 ///
-/// `Dsd` buffers are left untouched for now and `dop_phase` is not advanced:
-/// the DoP idle pattern (`0x69` with alternating markers) arrives with the DoP
-/// packer in Task 6, which replaces that arm.
+/// DoP: a `Dsd` buffer (the source's DSD bytes, `2 * channels` per frame)
+/// gets the idle byte `0x69` and `dop_phase` is left alone, because the
+/// packer advances it when it packs the period. A PCM container with
+/// `format` `Dop` (`I24Packed`/`I32`) gets idle DoP words whose markers
+/// continue from `dop_phase`, advancing it per frame.
 pub(crate) fn fill_silence(
     buf: &mut DeviceBuffer<'_>,
     from_frame: usize,
@@ -18,6 +21,12 @@ pub(crate) fn fill_silence(
     dop_phase: &mut bool,
 ) {
     let start = from_frame.saturating_mul(channels);
+    if let SampleFormat::Dop { .. } = format
+        && !matches!(buf, DeviceBuffer::Dsd(_))
+    {
+        fill_idle(buf, from_frame, channels, dop_phase);
+        return;
+    }
     match buf {
         DeviceBuffer::F32(b) => tail(b, start, 0.0),
         DeviceBuffer::F64(b) => tail(b, start, 0.0),
@@ -25,10 +34,7 @@ pub(crate) fn fill_silence(
         DeviceBuffer::I24Packed(b) => tail(b, start, [0; 3]),
         DeviceBuffer::I32(b) => tail(b, start, 0),
         DeviceBuffer::U8(b) => tail(b, start, 0x80),
-        DeviceBuffer::Dsd(_) => {
-            // Task 6: DoP idle pattern
-            let _ = (format, dop_phase);
-        }
+        DeviceBuffer::Dsd(b) => tail(b, start.saturating_mul(BYTES_PER_FRAME), IDLE),
     }
 }
 
@@ -95,17 +101,5 @@ mod tests {
             &mut false,
         );
         assert_eq!(b, [5; 4]);
-    }
-
-    #[test]
-    fn dsd_is_untouched_until_task_6() {
-        let mut b = [0x12u8; 4];
-        let mut phase = true;
-        let dop = SampleFormat::Dop {
-            dsd_rate: 2_822_400,
-        };
-        fill_silence(&mut DeviceBuffer::Dsd(&mut b), 0, 2, dop, &mut phase);
-        assert_eq!(b, [0x12; 4]);
-        assert!(phase);
     }
 }

@@ -17,6 +17,7 @@ pub(crate) const RT_MODULES: &[&str] = &[
     "src/render.rs",
     "src/convert.rs",
     "src/silence.rs",
+    "src/dop.rs",
     "src/driver.rs",
     "src/rtflags.rs",
     "src/ring.rs",

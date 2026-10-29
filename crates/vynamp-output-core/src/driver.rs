@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 
 use crate::config::StreamConfig;
 use crate::convert::convert_f32_to;
+use crate::dop::pack;
 use crate::format::SampleFormat;
 use crate::render::{
     DeviceBuffer, MonotonicNanos, PresentationTiming, RenderContext, RenderSource, TimingSource,
@@ -49,14 +50,19 @@ impl NativeBuf {
     }
 }
 
-/// Where the source renders: straight into the device buffer, or into an
-/// `f32` scratch converted afterwards (`path.library_conversion`).
+/// Where the source renders: straight into the device buffer, into an
+/// `f32` scratch converted afterwards (`path.library_conversion`), or, for
+/// DoP, into a DSD byte scratch packed afterwards (`dop.rs`).
 #[derive(Debug)]
 pub(crate) enum Pipeline {
     Direct,
     Convert {
         scratch: Box<[f32]>,
         spec: ConversionSpec,
+    },
+    /// `2 * period_frames * channels` DSD bytes.
+    Dop {
+        scratch: Box<[u8]>,
     },
 }
 
@@ -187,7 +193,7 @@ impl<C: PeriodClock, K: PeriodSink> Driver<C, K> {
         };
 
         let format = match self.pipeline {
-            Pipeline::Direct => self.config.format,
+            Pipeline::Direct | Pipeline::Dop { .. } => self.config.format,
             Pipeline::Convert { .. } => SampleFormat::F32,
         };
         let mut buf = work_buffer(&mut self.pipeline, &mut self.native);
@@ -198,18 +204,27 @@ impl<C: PeriodClock, K: PeriodSink> Driver<C, K> {
             format,
             &mut self.dop_phase,
         );
-        if let Pipeline::Convert { scratch, spec } = &self.pipeline {
-            let mut out = self.native.as_device();
-            if convert_f32_to(scratch, &mut out, *spec).is_err() {
-                // validated at open; never deliver stale samples regardless
-                fill_silence(
-                    &mut out,
-                    0,
-                    channels,
-                    self.config.format,
-                    &mut self.dop_phase,
-                );
+        let packed = match &self.pipeline {
+            Pipeline::Direct => Ok(()),
+            Pipeline::Convert { scratch, spec } => {
+                convert_f32_to(scratch, &mut self.native.as_device(), *spec)
             }
+            Pipeline::Dop { scratch } => pack(
+                scratch,
+                &mut self.native.as_device(),
+                channels,
+                &mut self.dop_phase,
+            ),
+        };
+        if packed.is_err() {
+            // validated at open; never deliver stale samples regardless
+            fill_silence(
+                &mut self.native.as_device(),
+                0,
+                channels,
+                self.config.format,
+                &mut self.dop_phase,
+            );
         }
         self.sink.deliver(&self.native);
 
@@ -225,6 +240,7 @@ fn work_buffer<'a>(pipeline: &'a mut Pipeline, native: &'a mut NativeBuf) -> Dev
     match pipeline {
         Pipeline::Direct => native.as_device(),
         Pipeline::Convert { scratch, .. } => DeviceBuffer::F32(scratch),
+        Pipeline::Dop { scratch } => DeviceBuffer::Dsd(scratch),
     }
 }
 
@@ -284,6 +300,11 @@ mod tests {
             let v = match period {
                 NativeBuf::I32(b) => b.to_vec(),
                 NativeBuf::I16(b) => b.iter().map(|&x| i32::from(x)).collect(),
+                // the 24-bit word, unsigned
+                NativeBuf::I24Packed(b) => b
+                    .iter()
+                    .map(|&[lo, mid, hi]| i32::from_le_bytes([lo, mid, hi, 0]))
+                    .collect(),
                 other => panic!("unexpected {other:?}"),
             };
             self.0.lock().unwrap().push(v);
@@ -457,6 +478,56 @@ mod tests {
         );
         run_device_thread(d);
         assert_eq!(rec.0.lock().unwrap()[0], vec![16384, 16384, 16384, 0]);
+        assert_eq!(flags.source_underruns.load(Ordering::Relaxed), 1);
+    }
+
+    /// Mono DSD: frame `n` carries bytes `(2n, 2n + 1)` of the stream; the
+    /// first call is full, the second reports one frame.
+    struct DsdCount(u32);
+    impl RenderSource for DsdCount {
+        fn render(&mut self, out: DeviceBuffer<'_>, ctx: &RenderContext<'_>) -> Rendered {
+            let DeviceBuffer::Dsd(b) = out else {
+                panic!("Dsd only")
+            };
+            for (k, byte) in b.iter_mut().enumerate() {
+                *byte = (2 * ctx.device_frame_index + k as u64) as u8;
+            }
+            self.0 += 1;
+            Rendered {
+                frames: if self.0 == 1 { P } else { 1 },
+                end_of_stream: false,
+            }
+        }
+    }
+
+    #[test]
+    fn dop_packs_into_i24_packed_with_continuous_markers() {
+        let flags = Arc::new(RtFlags::new());
+        flags.state.store(ST_RUNNING, Ordering::Relaxed);
+        let rec = Record::default();
+        let d = Driver::new(
+            Ticks(2),
+            rec.clone(),
+            Box::new(DsdCount(0)),
+            flags.clone(),
+            config(SampleFormat::Dop {
+                dsd_rate: 2_822_400,
+            }),
+            NativeBuf::I24Packed(vec![[0; 3]; P as usize].into_boxed_slice()),
+            Pipeline::Dop {
+                scratch: vec![0; 2 * P as usize].into_boxed_slice(),
+            },
+            0,
+        );
+        run_device_thread(d);
+        let p = rec.0.lock().unwrap().clone();
+        assert_eq!(
+            p,
+            vec![
+                vec![0x05_0001, 0xFA_0203, 0x05_0405, 0xFA_0607],
+                vec![0x05_0809, 0xFA_6969, 0x05_6969, 0xFA_6969]
+            ]
+        );
         assert_eq!(flags.source_underruns.load(Ordering::Relaxed), 1);
     }
 }

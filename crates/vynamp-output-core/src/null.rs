@@ -15,6 +15,7 @@ use std::thread::{self, JoinHandle, Thread};
 use std::time::{Duration, Instant};
 
 use crate::config::{EndpointVolume, PathProperties, RtPriority, StreamConfig, Transport, Tri};
+use crate::dop::{self, dop_pcm_rate};
 use crate::driver::{Driver, NativeBuf, PeriodClock, PeriodSink, Pipeline, run_device_thread};
 use crate::error::Error;
 use crate::event::Event;
@@ -275,7 +276,8 @@ impl BackendStream for ThreadBackend {
 }
 
 /// The capabilities of the default Null/Capture device: Shared and
-/// Exclusive; F32, I16, I24Packed, I32{24}, I32{32}; 44.1–768 kHz; 1–8 ch.
+/// Exclusive; F32, I16, I24Packed, I32{24}, I32{32}; 44.1–768 kHz; 1–8 ch;
+/// plus, in Exclusive only, DoP for DSD64/128/256 at 176.4/352.8/705.6 kHz.
 pub fn default_capability_entries() -> Vec<CapabilityEntry> {
     const RATES: [u32; 10] = [
         44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000, 705_600, 768_000,
@@ -299,6 +301,15 @@ pub fn default_capability_entries() -> Vec<CapabilityEntry> {
             });
         }
     }
+    for dsd_rate in [2_822_400, 5_644_800, 11_289_600] {
+        entries.push(CapabilityEntry {
+            mode: ShareMode::Exclusive,
+            format: SampleFormat::Dop { dsd_rate },
+            rates: dop_pcm_rate(dsd_rate).into_iter().collect(),
+            channels: (1..=8).collect(),
+            origin: CapabilityOrigin::Advertised,
+        });
+    }
     entries
 }
 
@@ -307,6 +318,10 @@ pub fn default_capability_entries() -> Vec<CapabilityEntry> {
 pub(crate) struct VirtualDevice {
     pub(crate) caps: Capabilities,
     pub(crate) name: &'static str,
+    /// Reported as `path.os_mixer_bypassed` (default `Yes`).
+    pub(crate) os_mixer_bypassed: Tri,
+    /// Reported as `path.endpoint_volume` (default `Unity`).
+    pub(crate) endpoint_volume: EndpointVolume,
 }
 
 impl VirtualDevice {
@@ -323,6 +338,8 @@ impl VirtualDevice {
                 entries,
             },
             name,
+            os_mixer_bypassed: Tri::Yes,
+            endpoint_volume: EndpointVolume::Unity,
         }
     }
 
@@ -360,6 +377,10 @@ impl VirtualDevice {
     /// Negotiates `req` and completes the config: period from the request,
     /// buffer = 2 periods, virtual path properties. Returns the config and
     /// the downgrade reason, if any.
+    ///
+    /// DoP needs a path that carries it unaltered (`dop::check_path`): a
+    /// mixed path or non-unity volume is `ExclusiveUnavailable`, a library
+    /// conversion from DoP `FormatUnsupported`.
     pub(crate) fn prepare(
         &self,
         req: &StreamRequest,
@@ -371,11 +392,8 @@ impl VirtualDevice {
         }
         let n = negotiate(req, &self.caps)?;
         let mut config = n.config_template;
-        if matches!(config.format, SampleFormat::Dop { .. }) {
-            // the DoP packer arrives in Task 6
-            return Err(Error::InvalidRequest {
-                what: "dop is not supported by this host yet",
-            });
+        if is_dop(req.format) && config.path.library_conversion.is_some() {
+            return Err(Error::FormatUnsupported { nearest: None });
         }
         if let Some(spec) = config.path.library_conversion
             && spec.from != SampleFormat::F32
@@ -406,15 +424,22 @@ impl VirtualDevice {
         config.buffer_frames = 2 * period as u32;
         let conversion = config.path.library_conversion;
         config.path = PathProperties {
-            os_mixer_bypassed: Tri::Yes,
+            os_mixer_bypassed: self.os_mixer_bypassed,
             os_resampling: false,
             library_conversion: conversion,
-            endpoint_volume: EndpointVolume::Unity,
+            endpoint_volume: self.endpoint_volume,
             transport: Transport::Virtual,
             rt_priority: RtPriority::Denied("virtual device: no real-time priority requested"),
         };
+        if is_dop(config.format) {
+            dop::check_path(&config.path)?;
+        }
         Ok((config, n.downgraded))
     }
+}
+
+fn is_dop(format: SampleFormat) -> bool {
+    matches!(format, SampleFormat::Dop { .. })
 }
 
 fn spawn_error(host: HostId) -> impl Fn(std::io::Error) -> Error {
@@ -426,6 +451,7 @@ fn spawn_error(host: HostId) -> impl Fn(std::io::Error) -> Error {
 }
 
 /// Allocates one period of native samples (zeroed: PCM silence; `U8` 0x80).
+/// DoP uses an `I32` container, MSB-justified (the packer writes every word).
 fn native_buffer(format: SampleFormat, samples: usize) -> NativeBuf {
     match format {
         SampleFormat::F32 => NativeBuf::F32(vec![0.0; samples].into_boxed_slice()),
@@ -468,6 +494,9 @@ pub(crate) fn launch<K: PeriodSink>(
     let samples = config.period_frames as usize * usize::from(config.channels);
     let native = native_buffer(config.format, samples);
     let pipeline = match config.path.library_conversion {
+        None if is_dop(config.format) => Pipeline::Dop {
+            scratch: vec![dop::IDLE; samples * dop::BYTES_PER_FRAME].into_boxed_slice(),
+        },
         None => Pipeline::Direct,
         Some(spec) => Pipeline::Convert {
             scratch: vec![0.0; samples].into_boxed_slice(),
@@ -578,6 +607,20 @@ impl NullHost {
             clock,
             device: VirtualDevice::new(HostId::Null, "null", "Null output", entries),
         }
+    }
+
+    /// Reports `os_mixer_bypassed` on opened streams (default `Yes`), e.g.
+    /// `No` to model a mixed path, where DoP is refused.
+    pub fn with_os_mixer_bypassed(mut self, bypassed: Tri) -> Self {
+        self.device.os_mixer_bypassed = bypassed;
+        self
+    }
+
+    /// Reports `endpoint_volume` on opened streams (default `Unity`); DoP is
+    /// refused with `NotUnity`.
+    pub fn with_endpoint_volume(mut self, volume: EndpointVolume) -> Self {
+        self.device.endpoint_volume = volume;
+        self
     }
 }
 

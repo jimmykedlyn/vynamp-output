@@ -1,6 +1,7 @@
 //! Zero-allocation checks for the RT helpers, using the testkit counter.
 
 use crate::convert::convert_f32_to;
+use crate::dop::pack;
 use crate::format::{Justify, SampleFormat};
 use crate::render::DeviceBuffer;
 use crate::request::ConversionSpec;
@@ -23,6 +24,9 @@ fn fill_and_convert_do_not_allocate() {
         },
         SampleFormat::I32 { valid_bits: 24 },
     ];
+
+    let dsd = vec![0x5Au8; 128];
+    let mut dsd_scratch = vec![0u8; 128];
 
     let before = allocations_on_this_thread();
     let spec = |to| ConversionSpec {
@@ -79,6 +83,27 @@ fn fill_and_convert_do_not_allocate() {
         SampleFormat::U8,
         &mut phase,
     );
+    let dop = SampleFormat::Dop {
+        dsd_rate: 2_822_400,
+    };
+    fill_silence(
+        &mut DeviceBuffer::Dsd(&mut dsd_scratch),
+        10,
+        2,
+        dop,
+        &mut phase,
+    );
+    pack(&dsd, &mut DeviceBuffer::I32(&mut i32s), 2, &mut phase).unwrap();
+    pack(&dsd, &mut DeviceBuffer::I24Packed(&mut i24), 2, &mut phase).unwrap();
+    fill_silence(&mut DeviceBuffer::I32(&mut i32s), 10, 2, dop, &mut phase);
+    fill_silence(
+        &mut DeviceBuffer::I24Packed(&mut i24),
+        10,
+        2,
+        dop,
+        &mut phase,
+    );
+    let _ = pack(&dsd, &mut DeviceBuffer::U8(&mut u8s), 2, &mut phase);
     let after = allocations_on_this_thread();
 
     assert_eq!(after - before, 0, "RT helpers must not allocate");

@@ -175,3 +175,40 @@ fn capture_ring_does_not_allocate() {
     );
     let _ = std::fs::remove_file(&m);
 }
+
+/// DSD bytes of the frame index; short (underrun) on odd calls.
+struct DsdAlternating {
+    calls: u64,
+}
+
+impl RenderSource for DsdAlternating {
+    fn render(&mut self, out: DeviceBuffer<'_>, ctx: &RenderContext<'_>) -> Rendered {
+        if let DeviceBuffer::Dsd(b) = out {
+            b.fill(ctx.device_frame_index as u8);
+        }
+        self.calls += 1;
+        Rendered {
+            frames: if self.calls.is_multiple_of(2) {
+                ctx.frames
+            } else {
+                ctx.frames / 2
+            },
+            end_of_stream: false,
+        }
+    }
+}
+
+#[test]
+fn dop_packing_and_idle_do_not_allocate() {
+    let mut req = request(SampleFormat::Dop {
+        dsd_rate: 2_822_400,
+    });
+    req.rate = 176_400;
+    let (clock, mut s) = start(NullHost::new, &req, DsdAlternating { calls: 0 });
+    clock.advance(2);
+    let base = clock.tick_probe();
+    clock.advance(50);
+    assert_eq!(clock.tick_probe() - base, 0, "device thread allocated");
+    assert_eq!(s.counters().source_underruns, 26);
+    s.stop().unwrap();
+}
