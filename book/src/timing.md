@@ -18,7 +18,8 @@ converter at `at`." `at` is on the OS monotonic clock (QPC on Windows,
 `RenderContext::device_frame_index` and `PresentationTiming::device_frame`
 count every frame delivered to the device, content and silence. A player maps
 "content position presented" by subtracting the silence it knows it caused
-(from `source_underruns` and the frames it did not supply), so the position is
+(from `source_underruns` and the frames it did not supply; a short final
+period with `end_of_stream` is silence-filled but not counted as an underrun), so the position is
 not underestimated after an underrun or a drain.
 
 ## Reported or estimated

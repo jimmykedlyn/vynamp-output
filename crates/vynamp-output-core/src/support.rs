@@ -8,6 +8,7 @@ use crate::format::HostId;
 
 /// How a (host, feature) pair has been verified, strongest first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum VerificationLevel {
     /// Delivered bytes compared bit for bit at a point that includes the OS path.
     CaptureVerified,
@@ -36,11 +37,15 @@ impl VerificationLevel {
 
 /// A capability whose verification level is tracked per host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Feature {
+    /// Opening streams in `ShareMode::Shared`.
     SharedMode,
+    /// Opening streams in `ShareMode::Exclusive`.
     ExclusiveMode,
     /// Integer PCM containers (16, 24 packed, 24-in-32, 32).
     IntegerPcm,
+    /// DSD over PCM (`SampleFormat::Dop`).
     Dop,
     /// `Stream::timing` and `RenderContext::timing`.
     Timing,
@@ -70,20 +75,6 @@ impl Feature {
             Feature::Events => "events",
         }
     }
-}
-
-impl HostId {
-    /// Every host, in matrix row order.
-    pub const ALL: [HostId; 8] = [
-        HostId::Wasapi,
-        HostId::Alsa,
-        HostId::PipeWire,
-        HostId::Pulse,
-        HostId::CoreAudio,
-        HostId::AAudio,
-        HostId::Null,
-        HostId::Capture,
-    ];
 }
 
 /// The strongest verification `host` has reached for `feature`, or `None`

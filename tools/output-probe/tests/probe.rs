@@ -44,6 +44,27 @@ fn null_virtual_run_prints_the_expected_shape() {
 }
 
 #[test]
+fn capture_host_run_records_a_file() {
+    let path = std::env::temp_dir().join(format!("output-probe-test-{}.bin", std::process::id()));
+    let out = probe(&[
+        "--host",
+        "capture",
+        "--capture-file",
+        path.to_str().unwrap(),
+        "--periods",
+        "10",
+    ]);
+    assert!(out.status.success(), "{out:?}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(text.lines().next(), Some("host: capture"));
+    assert!(text.contains("counters: callbacks=10 "), "{text}");
+    assert!(text.contains("device-thread allocations: 0 "), "{text}");
+    assert!(std::fs::metadata(&path).unwrap().len() > 0);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path.with_extension("json"));
+}
+
+#[test]
 fn bad_arguments_fail_with_a_message() {
     let out = probe(&["--host", "nope"]);
     assert_eq!(out.status.code(), Some(2));

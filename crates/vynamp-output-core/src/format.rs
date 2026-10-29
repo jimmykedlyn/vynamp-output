@@ -16,6 +16,18 @@ pub enum HostId {
 }
 
 impl HostId {
+    /// Every host, in matrix row order.
+    pub const ALL: [HostId; 8] = [
+        HostId::Wasapi,
+        HostId::Alsa,
+        HostId::PipeWire,
+        HostId::Pulse,
+        HostId::CoreAudio,
+        HostId::AAudio,
+        HostId::Null,
+        HostId::Capture,
+    ];
+
     /// Short lowercase name, stable for logs and messages.
     pub fn name(self) -> &'static str {
         match self {

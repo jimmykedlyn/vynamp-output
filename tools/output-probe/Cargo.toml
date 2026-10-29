@@ -12,7 +12,7 @@ description = "Opens a host/device, plays a sine and prints the real config, tim
 workspace = true
 
 [dependencies]
-vynamp-output = { path = "../../crates/vynamp-output" }
+vynamp-output = { path = "../../crates/vynamp-output", features = ["test-capture"] }
 # Only for the per-thread counting allocator (the allocator itself is declared
 # in main.rs as safe code; the `unsafe impl` lives in the testkit).
 vynamp-output-testkit = { path = "../../crates/vynamp-output-testkit" }

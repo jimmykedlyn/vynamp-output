@@ -18,7 +18,9 @@ pre-allocated scratch only.
 - If you report `Rendered { frames }` smaller than `ctx.frames`, the library
   fills the rest with the format's correct silence (zero PCM, `0x80` for `U8`,
   DSD idle `0x69` with continuous DoP markers) and counts one
-  `source_underruns` for that period. It never repeats samples.
+  `source_underruns` for that period, unless `end_of_stream` is set: a short
+  final period is silence-filled but is not an underrun. It never repeats
+  samples.
 - `ctx.device_frame_index` counts every frame delivered to the device, content
   and silence.
 - `end_of_stream: true` tells the library to stop asking for data; `drain`

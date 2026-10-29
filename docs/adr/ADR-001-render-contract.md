@@ -23,7 +23,9 @@ the transport honest and the real-time path auditable.
    It runs on the device thread and must not allocate, lock, block or do I/O.
    `out` is a typed, interleaved slice in the stream's **real** format. The
    library fills what the source did not write with the format's silence and
-   counts one `source_underruns` per short period; it never repeats samples.
+   counts one `source_underruns` per short period, unless `end_of_stream` is
+   set (a short final period is silence-filled but not an underrun); it never
+   repeats samples.
    A panic is caught, the stream turns to silence and `Event::SourcePanicked`
    is emitted.
 

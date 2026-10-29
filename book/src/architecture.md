@@ -53,5 +53,7 @@ entries. Decisions are recorded in [ADR-001](../../docs/adr/ADR-001-render-contr
 
 `cargo run -p output-probe` opens a host, plays a sine and prints the real
 `StreamConfig`, five timing samples, the counters and the number of heap
-allocations on the device thread (expected: 0). Options: `--host`, `--device`,
+allocations on the device thread (expected: 0). Hosts: `null` and `capture`
+(the facade's `test-capture` feature, enabled in the probe; `--capture-file`
+sets the output file). Options: `--host null|capture`, `--device`,
 `--clock virtual|real`, `--rate`, `--channels`, `--period-frames`, `--periods`.

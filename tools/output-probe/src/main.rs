@@ -3,7 +3,7 @@
 //! allocations made on the device thread while the stream ran.
 //!
 //! ```text
-//! output-probe [--host NAME] [--device ID] [--clock virtual|real]
+//! output-probe [--host null|capture] [--capture-file PATH] [--device ID] [--clock virtual|real]
 //!              [--rate HZ] [--channels N] [--period-frames N] [--periods N]
 //! ```
 //!
@@ -30,6 +30,7 @@ const TIMING_SAMPLES: u64 = 5;
 struct Args {
     host: String,
     device: Option<String>,
+    capture_file: Option<String>,
     real_clock: bool,
     rate: u32,
     channels: u16,
@@ -42,6 +43,7 @@ impl Default for Args {
         Args {
             host: "null".into(),
             device: None,
+            capture_file: None,
             real_clock: false,
             rate: 48_000,
             channels: 2,
@@ -63,6 +65,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
         match flag.as_str() {
             "--host" => out.host = value("--host")?,
             "--device" => out.device = Some(value("--device")?),
+            "--capture-file" => out.capture_file = Some(value("--capture-file")?),
             "--clock" => match value("--clock")?.as_str() {
                 "real" => out.real_clock = true,
                 "virtual" => out.real_clock = false,
@@ -140,9 +143,20 @@ fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let host: Box<dyn Host> = match args.host.as_str() {
         "null" if args.real_clock => Box::new(NullHost::new(NullClock::Real)),
         "null" => Box::new(NullHost::new(NullClock::Virtual(virtual_clock.clone()))),
+        "capture" => {
+            let path = args.capture_file.clone().map_or_else(
+                || std::env::temp_dir().join("output-probe-capture.bin"),
+                std::path::PathBuf::from,
+            );
+            let clock = if args.real_clock {
+                NullClock::Real
+            } else {
+                NullClock::Virtual(virtual_clock.clone())
+            };
+            Box::new(CaptureHost::new(path).with_clock(clock))
+        }
         other => {
-            let names: Vec<_> = hosts().iter().map(|h| h.id().name()).collect();
-            return Err(format!("unknown host {other:?}; available: {names:?}"));
+            return Err(format!("unknown host {other:?}; available: null, capture"));
         }
     };
     writeln!(out, "host: {}", host.id()).map_err(w)?;
