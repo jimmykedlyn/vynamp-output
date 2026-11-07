@@ -1,0 +1,21 @@
+[package]
+name = "vynamp-output-core"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Core API types, errors, events and format negotiation for vynamp-output"
+
+[lints]
+workspace = true
+
+[features]
+# The Capture test backend (records delivered bytes to a file). Off by
+# default; the facade exposes it as `test-capture`. The testkit enables it,
+# so it is always built and tested in the workspace.
+capture = []
+
+[dev-dependencies]
+vynamp-output-testkit = { path = "../vynamp-output-testkit" }

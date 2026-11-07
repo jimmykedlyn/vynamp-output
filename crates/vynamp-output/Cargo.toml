@@ -1,0 +1,21 @@
+[package]
+name = "vynamp-output"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Bit-exact audio output with explicit modes, negotiation and real-time timing"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Internal test backend that records the delivered bytes (spec §9.6); not
+# part of the published surface.
+test-capture = ["vynamp-output-core/capture"]
+
+[dependencies]
+vynamp-output-core = { path = "../vynamp-output-core" }
