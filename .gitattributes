@@ -1,1 +1,11 @@
-* text=auto eol=lf
+# O hook e um script POSIX. Com `core.autocrlf=true` -- o padrao de um Git
+# para Windows -- o clone converte LF em CRLF, e um shebang terminado em CRLF
+# nao executa: o kernel procura o interpretador "/bin/sh\r", nao acha, e o hook
+# vira um erro de execucao que o git so mostra no proximo commit. Medido: sem
+# esta linha, `file` no clone responde "with CRLF line terminators".
+.githooks/** text eol=lf
+setup.sh text eol=lf
+
+*.png binary
+*.zip binary
+*.flac binary
