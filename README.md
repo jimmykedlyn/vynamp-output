@@ -25,4 +25,6 @@ Sibling of [vynamp-decode](https://github.com/jimmykedlyn/vynamp-decode).
 - `cargo run -p output-probe`: plays a sine on a host (`null` or `capture`) and prints the real config, timing,
   counters and device-thread allocations.
 
+Licence: `MIT OR Apache-2.0` — [LICENSE](LICENSE) points to both,
+[LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
 See [CONTRIBUTING.md](CONTRIBUTING.md), [LEGAL.md](LEGAL.md) and [SECURITY.md](SECURITY.md).
