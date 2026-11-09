@@ -4,7 +4,7 @@ Dependency-free audio output library in Rust (std only): device enumeration, str
 negotiation and real-time rendering for Windows, Linux, macOS and Android, with no
 crates.io dependencies. `unsafe` is confined to per-platform `*-sys` crates.
 
-**Status:** pre-alpha, private repository. APIs are unstable and nothing is published.
+**Status:** pre-alpha, public repository. APIs are unstable and nothing is published.
 Sibling of [vynamp-decode](https://github.com/jimmykedlyn/vynamp-decode).
 
 ## Principles
