@@ -27,7 +27,9 @@ Sibling of [vynamp-decode](https://github.com/jimmykedlyn/vynamp-decode).
 
 Licence: `MIT OR Apache-2.0` — [LICENSE](LICENSE) points to both,
 [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
-See [CONTRIBUTING.md](CONTRIBUTING.md), [LEGAL.md](LEGAL.md) and [SECURITY.md](SECURITY.md).
+Security: [GitHub Security Advisories](https://github.com/jimmykedlyn/vynamp-output/security/advisories/new)
+— see [SECURITY.md](SECURITY.md). This library writes to audio devices.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [LEGAL.md](LEGAL.md).
 
 # Português — vynamp-output
 
@@ -65,4 +67,6 @@ publicado. Irmã de [vynamp-decode](https://github.com/jimmykedlyn/vynamp-decode
 
 Licença: `MIT OR Apache-2.0` — [LICENSE](LICENSE) aponta para as duas,
 [LICENSE-MIT](LICENSE-MIT) e [LICENSE-APACHE](LICENSE-APACHE).
-Ver [CONTRIBUTING.md](CONTRIBUTING.md), [LEGAL.md](LEGAL.md) e [SECURITY.md](SECURITY.md).
+Segurança: [GitHub Security Advisories](https://github.com/jimmykedlyn/vynamp-output/security/advisories/new)
+— ver [SECURITY.md](SECURITY.md). Esta biblioteca escreve em dispositivos de áudio.
+Ver [CONTRIBUTING.md](CONTRIBUTING.md) e [LEGAL.md](LEGAL.md).
