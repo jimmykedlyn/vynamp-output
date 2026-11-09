@@ -40,9 +40,9 @@ Spike shared output, ring SPSC e harness de callback com instrumentation.
 
 | ID | Given | When | Then |
 |---|---|---|---|
-| `TASK-E01-02-AC-1` | PENDENTE | PENDENTE | Nenhum lock/alloc/I/O na callback |
-| `TASK-E01-02-AC-2` | PENDENTE | PENDENTE | clock deriva consumo e device latency |
-| `TASK-E01-02-AC-3` | PENDENTE | PENDENTE | underrun gera zeros sem replay. |
+| `TASK-E01-02-AC-1` | a callback de áudio rodando com o ring SPSC pré-alocado | o harness instrumenta uma reprodução completa | Nenhum lock/alloc/I/O na callback |
+| `TASK-E01-02-AC-2` | a callback publicando `presented` por seqlock de escritor único | a latência reportada do primeiro frame do buffer é comparada com o conteúdo consumido | clock deriva consumo e device latency |
+| `TASK-E01-02-AC-3` | o ring sem amostras disponíveis e a marca de fim de stream ainda não lida | a callback preenche a região restante | underrun gera zeros sem replay. |
 
 ## Verificação
 
