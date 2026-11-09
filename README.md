@@ -25,6 +25,16 @@ Sibling of [vynamp-decode](https://github.com/jimmykedlyn/vynamp-decode).
 - `cargo run -p output-probe`: plays a sine on a host (`null` or `capture`) and prints the real config, timing,
   counters and device-thread allocations.
 
+## CI
+
+GitHub Actions is the only CI (ADR-014). [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+runs `fmt`, `clippy`, `test` and `machete` on every pull request to `develop`, and the
+job `gate` publishes the required status **`CI Gate`**. It runs with `if: always()` and
+reads `needs.*.result`, so a dependency that fails, is cancelled or never reports fails
+the gate. Actions are pinned by full commit SHA. The runner has no audio device: what CI
+proves is that the crate builds warning-free and that the offline tests pass — timing and
+device behaviour are `quality.yml` hardware work, not this gate.
+
 Licence: `MIT OR Apache-2.0` — [LICENSE](LICENSE) points to both,
 [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
 Security: [GitHub Security Advisories](https://github.com/jimmykedlyn/vynamp-output/security/advisories/new)
@@ -64,6 +74,17 @@ publicado. Irmã de [vynamp-decode](https://github.com/jimmykedlyn/vynamp-decode
 - `cargo run -p output-probe`: toca uma senoide no host (`null` ou `capture`) e
   imprime a configuração real, o timing, os contadores e as alocações da thread
   de device.
+
+## CI
+
+O GitHub Actions é a única CI (ADR-014). O
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda `fmt`, `clippy`, `test`
+e `machete` em todo pull request para `develop`, e o job `gate` publica o status
+exigido **`CI Gate`**. Ele roda com `if: always()` e lê `needs.*.result`, então uma
+dependência que falha, é cancelada ou nunca reporta reprova o gate. As actions vão
+fixadas por SHA de commit completo. O runner não tem dispositivo de áudio: o que a
+CI prova é que o crate compila sem aviso e que os testes offline passam — timing e
+comportamento de device são trabalho de hardware do `quality.yml`, não deste gate.
 
 Licença: `MIT OR Apache-2.0` — [LICENSE](LICENSE) aponta para as duas,
 [LICENSE-MIT](LICENSE-MIT) e [LICENSE-APACHE](LICENSE-APACHE).
