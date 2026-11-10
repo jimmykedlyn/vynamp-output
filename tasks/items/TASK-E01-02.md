@@ -1,9 +1,8 @@
 # TASK-E01-02 — Provar callback e output clock
 
 > Gerado pelo passo 37 a partir de `tasks/backlog.json`. Os campos de estado vêm do
-> backlog e não devem ser editados aqui. Critério de aceite: **PENDENTE** de autoria —
-> a coluna `Then` é o requisito aprovado, copiado literal; `Given` e `When` ainda
-> não existem.
+> backlog e não devem ser editados aqui. A coluna `Then` é o requisito aprovado,
+> copiado literal do backlog; `Given` e `When` foram autorados na execução.
 
 | Campo | Valor |
 |---|---|
@@ -27,7 +26,28 @@ Spike shared output, ring SPSC e harness de callback com instrumentation.
 
 ## Boundary
 
-<!-- PENDENTE: o que esta TASK não faz, mesmo parecendo relacionado. -->
+- **Não** conserta o viés do relógio apresentado. `presented = conteúdo escrito antes da
+  callback − latência` subestima a posição em até `latency_frames` quando há silêncio
+  de underrun ou de drenagem enfileirado — 12 393–12 800 frames no hardware medido. A
+  correção depende do dreno completo, que é `TASK-E01-05` (engine). Esta TASK publica o
+  relógio e caracteriza o limite; o que drenar é decisão do engine.
+- **Não** escreve o backend de OS. O repo entrega `NullHost` e `CaptureHost`; a
+  `crates/vynamp-output/src/lib.rs` declara que "release only the pure-Rust
+  [`NullHost`] exists; OS backends (WASAPI, ...)" vêm depois. WASAPI exclusive, ALSA
+  `hw:` e CoreAudio são `TASK-E04-05`, e DoP/384 kHz é `TASK-E04-06`.
+- **Não** faz resampling, dither nem ganho. A ADR-011 fixa que "a saída nunca faz
+  resampling, dither nem ganho" — essas etapas são do grafo DSP. `specs/output.md` §2
+  permite `vynamp-dsp` atrás da feature `resample`, mas nenhum `Cargo.toml` do workspace
+  declara essa dependência: o caminho não existe, não está só desligado.
+- **Não** mixa, não drena e não faz transição de faixa. O `drain` desta lib só espera a
+  posição alcançar `content_end`; quem enfileira conteúdo, faz fade e troca de fonte é
+  o engine (`TASK-E01-03`, `TASK-E01-05`).
+- **Não** prova áudio audível nem bit-perfect de hardware. A validação acústica segue
+  ausente, e `docs/hardware-matrix.md` está com toda linha em "not run" — o spike
+  mediu contadores e alocações, não o que sai da tomada do DAC.
+- **Não** fecha AC-3 como comportamento de player. Underrun gerando zeros sem replay é
+  provado na `driver.rs` e em `tests/stream.rs`; o que o engine deve fazer ao detectar
+  o underrun não é decidido aqui.
 
 ## Antes de começar
 
@@ -48,9 +68,9 @@ Spike shared output, ring SPSC e harness de callback com instrumentation.
 
 | Item | Comando / fixture | Evidência esperada |
 |---|---|---|
-| Teste automatizado | `cargo test` no repo `vynamp-output` | verde no CI Gate |
-| Oráculo independente | PENDENTE | comparação numérica, não "parece certo" |
-| Hardware | PENDENTE | ausência é limitação registrada, não aprovação |
+| Teste automatizado | `cargo test --workspace --locked` no repo `vynamp-output` — cobre `--test zero_alloc_device` (AC-1), `--test stream` e `--test null_host` (AC-2), e `driver::tests::underrun_tail_is_silence_and_samples_are_never_replayed`, unit test da lib de `vynamp-output-core`, junto com `--test stream` (AC-3) | `133 passed, 1 ignored, 18 suites`, exit 0; o ignorado é o doctest `alloc (line 8)` do testkit. Suítes por AC: 5 verdes em `zero_alloc_device`, 10 em `stream`, 7 em `null_host`, e o `underrun_tail_…` no binário de unittests da lib do core. Verde no `CI Gate` de `.github/workflows/ci.yml` (`fmt` → `clippy` → `test` → `machete` → agregado) |
+| Oráculo independente | `ChannelRamp` do testkit — frame `f` carrega `start + step * f`, então uma amostra repetida ou fora de ordem aparece como valor que a rampa não prevê —, mais `expected_values()` em `tests/capture.rs`, que reconstrói a sequência esperada com `None` no rabo de underrun; no hardware, os JSON de `evidence/PR/task-e01-02/` (SHA-256 `a3621cc7…` e `4844d2fd…`, reconferidos) | comparação amostra a amostra contra a sequência prevista, não "parece certo": no spike, `presented_frames_final` 11 507 474 contra 11 520 000 de conteúdo, diferença dentro da faixa de latência medida (12 393–12 800), `presented_regressions: 0` e `clock_rate_ratio` 1,00017 |
+| Hardware | spike em WASAPI shared real: dispositivo padrão `Headset (USB 384KZ HIFI Audio)`, 384 000 Hz, 3 840 frames de buffer, 30 s, com e sem stall de 300 ms (`probe-steady` e `probe-stall`) | `rt_alloc_events: 0` nos dois, `underruns` 0 e 25, `stream_errors: 0` e `presented_regressions: 0`. **Limitação declarada, não aprovação:** o repo hoje só tem `NullHost` e `CaptureHost` — a `crates/vynamp-output/src/lib.rs` diz que backends de OS chegam em releases posteriores —, então o probe atual não reproduz esse run sem o backend WASAPI, que é `TASK-E04-05`. Linux, macOS e Android não foram medidos |
 
 ## DoD — pronto para review
 
