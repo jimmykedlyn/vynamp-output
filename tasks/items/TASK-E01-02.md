@@ -42,12 +42,14 @@ Spike shared output, ring SPSC e harness de callback com instrumentation.
 - **Não** mixa, não drena e não faz transição de faixa. O `drain` desta lib só espera a
   posição alcançar `content_end`; quem enfileira conteúdo, faz fade e troca de fonte é
   o engine (`TASK-E01-03`, `TASK-E01-05`).
-- **Não** prova áudio audível nem bit-perfect de hardware. A validação acústica segue
-  ausente, e `docs/hardware-matrix.md` está com toda linha em "not run" — o spike
-  mediu contadores e alocações, não o que sai da tomada do DAC.
+- **Não** prova áudio audível nem bit-perfect de hardware. A dona é `TASK-E04-10`, que
+  valida qualidade numérica e matriz de hardware. A validação acústica segue ausente, e
+  `docs/hardware-matrix.md` está com toda linha em "not run" — o spike mediu contadores e
+  alocações, não o que sai da tomada do DAC.
 - **Não** fecha AC-3 como comportamento de player. Underrun gerando zeros sem replay é
   provado na `driver.rs` e em `tests/stream.rs`; o que o engine deve fazer ao detectar
-  o underrun não é decidido aqui.
+  o underrun não é decidido aqui, e sim em `TASK-E01-10`, que separa underrun do app do
+  underrun do ambiente e publica o limite.
 
 ## Antes de começar
 
