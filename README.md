@@ -7,6 +7,8 @@ crates.io dependencies. `unsafe` is confined to per-platform `*-sys` crates.
 **Status:** pre-alpha, public repository. APIs are unstable and nothing is published.
 Sibling of [vynamp-decode](https://github.com/jimmykedlyn/vynamp-decode).
 
+**Specs:** every file in [`specs/`](specs/) is at v0.2.0, an authored draft not yet approved by the maintainer. No number in them is a contract until it is approved.
+
 ## Principles
 
 - No silent fallback: a request that cannot be honoured is an error, or an explicit
@@ -52,6 +54,8 @@ confinado aos crates `*-sys` de cada plataforma.
 
 **Estado:** pré-alpha, repositório público. As APIs são instáveis e nada foi
 publicado. Irmã de [vynamp-decode](https://github.com/jimmykedlyn/vynamp-decode).
+
+**Specs:** todos os arquivos em [`specs/`](specs/) estão em v0.2.0, rascunho autorado ainda não aprovado pelo mantenedor. Nenhum número neles é contrato antes da aprovação.
 
 ## Princípios
 
