@@ -1,13 +1,11 @@
 # tasks — vynamp-output
 
-
 6 tarefa(s) do backlog com este repositório como dono.
-Todas de produto; as de engenharia moram no umbrella e no engine.
-
+Todas de produto; as de engenharia moram no umbrella.
 
 | ID | Título | Módulo dono | Estado |
 |---|---|---|---|
-| `TASK-E01-02` | Provar callback e output clock | vynamp-output | in_progress |
+| `TASK-E01-02` | Provar callback e output clock | vynamp-output | implemented |
 | `TASK-E04-05` | Entregar saída exclusiva e device profiles | vynamp-output | planned |
 | `TASK-E04-06` | Entregar modo transparente e diagnósticos hi-res | vynamp-output | planned |
 | `TASK-E04-09` | Entregar perfis e headphone preset import | vynamp-output | planned |
@@ -16,3 +14,4 @@ Todas de produto; as de engenharia moram no umbrella e no engine.
 
 O status oficial é o `tasks/backlog.json` do umbrella. O índice de épico fica lá
 também: uma cópia por repo divergiria.
+Estados conferidos contra o backlog em 2026-11-11.
