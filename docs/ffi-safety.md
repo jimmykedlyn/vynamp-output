@@ -5,7 +5,7 @@ reviews (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 | Crate | Invariants | Opus review (date, PR) |
 |-------|------------|------------------------|
-| `vynamp-output-wasapi-sys` | see below | 2026-11-15, two clean-context Opus reviews: round 1 at `1b3f442` **CHANGES REQUIRED** (5 blocking findings); round 2 at `b0cec68` **APPROVE WITH NITS** (all 5 fixed, no new blocking findings). PR: ainda não aberto (branch `feature/task-e04-05-claude-wasapi-exclusive`) |
+| `vynamp-output-wasapi-sys` | see below | 2026-11-15, two clean-context Opus reviews: round 1 at `1b3f442` **CHANGES REQUIRED** (5 blocking findings); round 2 at `b0cec68` **APPROVE WITH NITS** (all 5 fixed, no new blocking findings). PR: [#19](https://github.com/jimmykedlyn/vynamp-output/pull/19) |
 
 ## `vynamp-output-wasapi-sys`
 
