@@ -80,16 +80,30 @@ impl Feature {
 /// The strongest verification `host` has reached for `feature`, or `None`
 /// when the host does not implement it in this release.
 ///
-/// The OS backends are not implemented yet. `Null` and `Capture` are
-/// library-verified for every feature: their tests run in every CI build.
+/// `Null` and `Capture` are library-verified for every feature: their tests
+/// run in every CI build.
+///
+/// `Wasapi` is `Compiled`: the backend is in the crate and the Windows target
+/// compiles it in CI, and nothing was ever run. `Compiled` is the weakest
+/// level and the only honest one — no WASAPI test has run on hardware, so
+/// nothing above it is claimed. The hardware criteria (`OUTPUT-AC-16` to
+/// `OUTPUT-AC-18`, `OUTPUT-BK-AC-15` to `AC-19`) are `#[ignore]` until a DAC
+/// and a Windows 11 machine run them; when they do, this is raised to
+/// `HardwareVerified` and the evidence goes in `docs/hardware-matrix.md`.
+///
+/// The answer is the same on every host target: `docs/support-matrix.md` is
+/// one committed file, so it must not change when the doc generator runs on a
+/// different OS. The `Compiled` claim is backed by the `wasapi` job in
+/// `.github/workflows/ci.yml`, which builds this crate for
+/// `x86_64-pc-windows-msvc` on every run.
+///
+/// The other OS backends are not implemented: `None`.
 pub fn support(host: HostId, _feature: Feature) -> Option<VerificationLevel> {
     match host {
         HostId::Null | HostId::Capture => Some(VerificationLevel::LibraryVerified),
-        HostId::Wasapi
-        | HostId::Alsa
-        | HostId::PipeWire
-        | HostId::Pulse
-        | HostId::CoreAudio
-        | HostId::AAudio => None,
+        HostId::Wasapi => Some(VerificationLevel::Compiled),
+        HostId::Alsa | HostId::PipeWire | HostId::Pulse | HostId::CoreAudio | HostId::AAudio => {
+            None
+        }
     }
 }

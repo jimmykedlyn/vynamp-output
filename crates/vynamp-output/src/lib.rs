@@ -70,19 +70,58 @@ pub struct HostSelection {
 
 /// Every host available in this build, in preference order.
 ///
-/// Currently only [`NullHost`] on the real clock.
+/// On Windows the WASAPI host comes first and the [`NullHost`] last; on every
+/// other target only the [`NullHost`] exists, because no OS backend is
+/// compiled there. The order is decided by [`candidates`], which is a pure
+/// function and is tested on every target.
 pub fn hosts() -> Vec<Box<dyn Host>> {
-    vec![Box::new(NullHost::new(NullClock::Real))]
+    let mut out: Vec<Box<dyn Host>> = Vec::new();
+    for name in candidates(&preference()) {
+        match name {
+            #[cfg(all(target_os = "windows", feature = "wasapi"))]
+            "wasapi" => out.push(Box::new(WasapiHost::new())),
+            "null" => out.push(Box::new(NullHost::new(NullClock::Real))),
+            // A name the build does not contain cannot appear: `preference`
+            // only sets a flag for a backend that was compiled.
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Which backends this build contains.
+fn preference() -> Preference {
+    Preference::new(
+        cfg!(all(target_os = "windows", feature = "wasapi")),
+        cfg!(feature = "test-capture"),
+        false,
+        false,
+    )
 }
 
 /// The preferred host for this platform and how it was chosen.
 ///
-/// Currently always [`NullHost`] on the real clock, with nothing skipped.
+/// The first entry of [`hosts`], with the hosts that were not chosen listed
+/// in `skipped` and the reason each was passed over.
 pub fn default_host() -> (Box<dyn Host>, HostSelection) {
-    let host = Box::new(NullHost::new(NullClock::Real));
-    let selection = HostSelection {
-        chosen: HostId::Null,
-        skipped: Vec::new(),
-    };
-    (host, selection)
+    let mut all = hosts();
+    let chosen = all.first().map(|h| h.id()).unwrap_or(HostId::Null);
+    let skipped = all
+        .iter()
+        .skip(1)
+        .map(|h| (h.id(), skip_reason(h.id())))
+        .collect();
+    let host = all
+        .drain(..)
+        .next()
+        .unwrap_or_else(|| Box::new(NullHost::new(NullClock::Real)));
+    (host, HostSelection { chosen, skipped })
+}
+
+/// Why a host that was not chosen was passed over.
+fn skip_reason(host: HostId) -> &'static str {
+    match host {
+        HostId::Null => "fallback host: discards audio",
+        _ => "a more specific backend was chosen first",
+    }
 }
