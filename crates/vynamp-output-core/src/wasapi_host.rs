@@ -374,13 +374,26 @@ impl PeriodClock for WasapiClock {
 struct WasapiSink {
     stream: Arc<sys::ExclusiveStream>,
     bytes: Box<[u8]>,
+    flags: Arc<RtFlags>,
 }
 
 impl PeriodSink for WasapiSink {
     fn deliver(&mut self, period: &NativeBuf) {
         let n = write_native(period, &mut self.bytes);
-        if let Some(slice) = self.bytes.get(..n) {
-            let _ = self.stream.write_period(slice);
+        let Some(slice) = self.bytes.get(..n) else {
+            return;
+        };
+        match self.stream.write_period(slice) {
+            Ok(()) => {}
+            // The endpoint vanished between the wait and the write. Report it
+            // the same way the wait path does, so the stream moves to `Lost`
+            // and the watcher emits `DeviceLost`; the next wait then leaves
+            // the loop. Swallowing it would keep the thread spinning on a
+            // dead device until the 2 s wait timeout.
+            Err(status) if status.is_device_gone() => self.flags.notify_lost(),
+            // A transient write failure (a stalled period) is not fatal: the
+            // next wait retries, exactly as in `WasapiClock::wait`.
+            Err(_) => {}
         }
     }
 }
@@ -434,6 +447,10 @@ impl BackendStream for WasapiBackend {
 
     fn stop(&mut self) -> Result<(), Error> {
         self.flags.exit.store(true, Ordering::Release);
+        // `IAudioClient::Stop` makes the OS signal the stream's event, which
+        // is what the device thread is blocked on in `wait_period`; without
+        // it the thread would sit out the 2 s `WaitForSingleObject` timeout
+        // before it re-reads `exit`. `unpark` below cannot wake that wait.
         let status = self.stream.stop();
         if let Some(h) = self.device.take() {
             h.thread().unpark();
@@ -500,6 +517,7 @@ fn launch(
         WasapiSink {
             stream: stream.clone(),
             bytes,
+            flags: flags.clone(),
         },
         source,
         flags.clone(),
