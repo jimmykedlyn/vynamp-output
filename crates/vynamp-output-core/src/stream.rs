@@ -29,6 +29,7 @@ use crate::config::StreamConfig;
 use crate::error::Error;
 use crate::event::Event;
 use crate::render::PresentationTiming;
+use crate::request::DeviceId;
 use crate::rtflags::{RtFlags, ST_DRAINING, ST_LOST, ST_OPENED, ST_PAUSED, ST_RUNNING, ST_STOPPED};
 
 /// Lifecycle state of a [`Stream`] (see the module-level table).
@@ -99,6 +100,7 @@ pub struct Stream {
     backend: Box<dyn BackendStream>,
     watcher: Option<JoinHandle<()>>,
     events: Receiver<Event>,
+    open_attempts: Vec<DeviceId>,
     closed: bool,
 }
 
@@ -108,12 +110,16 @@ fn invalid_state() -> Error {
 
 impl Stream {
     /// Assembles a stream whose device thread and watcher already run.
+    ///
+    /// `open_attempts` is the list the backend recorded while opening this
+    /// stream, in order; it is what [`Stream::open_attempts`] reports.
     pub(crate) fn new(
         config: StreamConfig,
         flags: Arc<RtFlags>,
         backend: Box<dyn BackendStream>,
         watcher: JoinHandle<()>,
         events: Receiver<Event>,
+        open_attempts: Vec<DeviceId>,
     ) -> Self {
         Stream {
             config,
@@ -121,6 +127,7 @@ impl Stream {
             backend,
             watcher: Some(watcher),
             events,
+            open_attempts,
             closed: false,
         }
     }
@@ -132,6 +139,19 @@ impl Stream {
 
     pub fn state(&self) -> StreamState {
         StreamState::from_code(self.flags.state_code())
+    }
+
+    /// Every device this host tried to open for this stream, in order.
+    ///
+    /// The backend appends to it on each open attempt, so it is evidence and
+    /// not a restatement of the request: a host that tried the DAC, failed
+    /// and fell back to the default speaker reports both ids here. An empty
+    /// list means no attempt was recorded (a backend that does not fill it).
+    ///
+    /// It is what `OUTPUT-AC-18` and `OUTPUT-BK-AC-19` read when they require
+    /// "a lista de dispositivos que o host tentou abrir ou abriu".
+    pub fn open_attempts(&self) -> &[DeviceId] {
+        &self.open_attempts
     }
 
     /// `Opened -> Running`.

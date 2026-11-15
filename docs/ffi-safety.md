@@ -69,5 +69,6 @@ The crate compiles for `x86_64-pc-windows-msvc` in CI, and the pure parts are
 tested on Linux. **Nothing in this crate has run against a real device.** The
 hardware criteria (`OUTPUT-AC-16` to `OUTPUT-AC-18`, `OUTPUT-BK-AC-15` to
 `AC-19`) are `#[ignore]` until a DAC and a Windows 11 machine run them. Until
-then `support(HostId::Wasapi, _)` is `Compiled`, which is exactly "the target
-builds; nothing ran".
+then `support(HostId::Wasapi, _)` is `Compiled` for the features the backend
+has, and `None` for DoP, which `to_wasapi` refuses: `Compiled` is exactly "the
+target builds; nothing ran".

@@ -521,7 +521,19 @@ fn launch(
         device: Some(device),
         flags: flags.clone(),
     };
-    Ok(Stream::new(config, flags, Box::new(backend), watcher, rx))
+    // Recorded here, at the single point where this backend opens a device:
+    // the list can only ever hold the endpoint `open` actually opened, so a
+    // fallback to another device would have to add a second id to be read
+    // back, and there is no code path that does.
+    let open_attempts = vec![config.device.clone()];
+    Ok(Stream::new(
+        config,
+        flags,
+        Box::new(backend),
+        watcher,
+        rx,
+        open_attempts,
+    ))
 }
 
 /// One period of native samples, zeroed.

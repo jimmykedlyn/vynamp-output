@@ -58,19 +58,32 @@ fn default_host_prefers_wasapi_and_says_what_it_skipped() {
 }
 
 #[test]
-fn support_declares_wasapi_as_compiled_and_never_stronger() {
+fn support_declares_wasapi_per_feature_and_never_stronger() {
     // The backend has never run on hardware, so `Compiled` — "the target
-    // builds; nothing ran" — is the strongest honest claim. The answer must
-    // not depend on the host OS, because `docs/support-matrix.md` is one
-    // committed file generated on whichever machine runs the generator.
-    for feature in Feature::ALL {
+    // builds; nothing ran" — is the strongest honest claim for the features
+    // it has. The answer must not depend on the host OS, because
+    // `docs/support-matrix.md` is one committed file generated on whichever
+    // machine runs the generator.
+    for (feature, want) in [
+        (Feature::SharedMode, Some(VerificationLevel::Compiled)),
+        (Feature::ExclusiveMode, Some(VerificationLevel::Compiled)),
+        (Feature::IntegerPcm, Some(VerificationLevel::Compiled)),
+        // `to_wasapi` rejects `SampleFormat::Dop` and the backend has no DoP
+        // packing path: declaring even `Compiled` would promise what the code
+        // refuses.
+        (Feature::Dop, None),
+        (Feature::Timing, Some(VerificationLevel::Compiled)),
+        (Feature::Events, Some(VerificationLevel::Compiled)),
+    ] {
         assert_eq!(
             support(HostId::Wasapi, feature),
-            Some(VerificationLevel::Compiled),
-            "{feature:?}: no WASAPI test has run on hardware, so nothing \
-             stronger than `Compiled` is honest"
+            want,
+            "{feature:?}: `Compiled` is the ceiling for a backend that never \
+             ran, and `None` where the backend has no such path"
         );
     }
+    // Every feature is covered above, so a new one cannot slip through.
+    assert_eq!(Feature::ALL.len(), 6);
 }
 
 #[test]

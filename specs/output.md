@@ -271,7 +271,7 @@ cargo test --workspace
 
 | Limitação | Consequência | Quem cobre |
 |---|---|---|
-| O host WASAPI existe (exclusivo) mas nunca rodou em hardware | `support(Wasapi, _)` é `Compiled`: o alvo compila, nada foi medido; as ACs de DAC ficam `#[ignore]` até um run real | `docs/hardware-matrix.md`, `TASK-E04-05` |
+| O host WASAPI existe (exclusivo) mas nunca rodou em hardware | `support(Wasapi, _)` é `Compiled` nos recursos que o backend tem e `None` em DoP, que `to_wasapi` recusa: o alvo compila, nada foi medido; as ACs de DAC ficam `#[ignore]` até um run real | `docs/hardware-matrix.md`, `TASK-E04-05` |
 | Todo recurso está em `LibraryVerified` | não há prova em hardware nem de integração | `docs/hardware-matrix.md`, `TASK-E04-06` |
 | `DsdNative` e PCM 768 kHz não existem | DSD só por DoP | `OUTPUT-REQ-11` e `OUTPUT-REQ-12`, `TASK-E12-04` (M5) |
 | `Stream::reconfigure(rate)` do design não existe | troca de taxa em exclusivo exige fechar e reabrir o stream | futura TASK de hosts reais |

@@ -588,7 +588,17 @@ pub(crate) fn launch<K: PeriodSink>(
         device: Some(device),
         finish: l.finish,
     };
-    Ok(Stream::new(config, flags, Box::new(backend), watcher, rx))
+    // The virtual device is the only one this host can open, and it was
+    // opened: the list is the backend's own record, not the request's.
+    let open_attempts = vec![config.device.clone()];
+    Ok(Stream::new(
+        config,
+        flags,
+        Box::new(backend),
+        watcher,
+        rx,
+        open_attempts,
+    ))
 }
 
 /// A host with one virtual output device (`"null"`) that discards audio.
