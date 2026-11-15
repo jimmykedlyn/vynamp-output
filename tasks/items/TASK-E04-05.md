@@ -13,7 +13,7 @@
 | Critérios da spec | `specs/output.md` §5 (`OUTPUT-AC-16` a `OUTPUT-AC-18`, aprovados em 2026-11-15) e `specs/backends.md` §5 (`OUTPUT-BK-AC-15` a `OUTPUT-BK-AC-19`, aprovados em 2026-11-15) |
 | Fase | M3 |
 | Prioridade | P1 |
-| Estado | planned |
+| Estado | in_progress |
 | Depende de | `TASK-E01-02`, `TASK-E04-02` |
 | Bloqueia | `TASK-E04-06`, `TASK-E04-09` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
@@ -68,3 +68,24 @@ WASAPI event-exclusive, stable IDs, capabilities e ASIO adapter opcional.
 ## Notas de execução
 
 Preenchido durante a execução, não antes.
+
+### 2026-11-15 — implementação
+
+- **Base.** A §5 aprovada (`OUTPUT-AC-16..18`, `OUTPUT-BK-AC-15..19`) não está em
+  `origin/develop` (`4ab3ac2`); vive em `0de18fd`, branch
+  `chore/claude-specs-e04-05-output`. A branch de trabalho parte de `0de18fd`.
+- **Entregue.** `crates/vynamp-output-wasapi-sys/` (FFI própria, `unsafe` só ali),
+  `WasapiHost` em `vynamp-output-core` sob `cfg(target_os = "windows")` + feature
+  `wasapi`, `hosts()`/`default_host()` com ordem de preferência pura e testada,
+  `support(Wasapi, _) = Compiled`, job `wasapi` no CI que type-checka o alvo
+  Windows, `docs/sources/wasapi.md` e `docs/ffi-safety.md`.
+- **Não provado.** Nenhuma AC de DAC rodou: não há DAC USB nem Windows 11 neste
+  ambiente. Os três testes de `tests/wasapi_exclusive.rs` são `#[ignore]` com o
+  motivo escrito. `support` fica em `Compiled`, nunca acima.
+- **Conflito de spec, não resolvido por edição.** `OUTPUT-BK-AC-11`/`AC-12` dizem
+  `hosts()` = só `Null`; `OUTPUT-AC-16` (aprovada depois, no mesmo dia) exige
+  WASAPI em `hosts()`. As duas não valem juntas no Windows. Os testes afirmam a
+  AC-16 no Windows e a AC-11/12 fora dele, e a divergência está registrada aqui
+  para o mantenedor decidir; a spec não foi reescrita para caber no código.
+- **Fora.** ASIO (sem critério aprovado), perfis de dispositivo (E04-09),
+  `IMMNotificationClient`, `IAudioEndpointVolume` (volume fica `Unknown`).

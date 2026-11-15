@@ -147,7 +147,7 @@ pub trait RenderSource: Send + 'static {
 | `OUTPUT-REQ-06` | PCM inteiro (I24Packed, I32 com bits válidos, F32) chega bit a bit ao ponto de captura, sem troca de canais — implemented no host `Capture`; planned (M3) em hardware | `REQ-E04-06` | `TASK-E04-06` | `tests/capture.rs` |
 | `OUTPUT-REQ-07` | DoP DSD64/128/256 em 176,4/352,8/705,6 kHz, com marcador contínuo através de períodos e underrun, e recusado em caminho misto, desconhecido, shared, com volume não unity ou com conversão — implemented | `REQ-E12-04` | `TASK-E12-04` | `tests/dop.rs` |
 | `OUTPUT-REQ-08` | Máquina de estados fixa; `drain` termina exatamente após o último quadro de conteúdo ou devolve `TimedOut`; `Drop` para o stream — implemented | `REQ-E01-02` | `TASK-E01-02` | `tests/stream.rs` |
-| `OUTPUT-REQ-09` | `DeviceLost` vem só do backend; a biblioteca nunca migra para outro dispositivo sozinha — implemented no contrato; planned (M3) nos hosts reais | `REQ-E04-05` | `TASK-E04-05` | `tests/stream.rs` |
+| `OUTPUT-REQ-09` | `DeviceLost` vem só do backend; a biblioteca nunca migra para outro dispositivo sozinha — implemented no contrato; implemented no host WASAPI (nunca reabre, só `Lost`); provado em hardware ainda não | `REQ-E04-05` | `TASK-E04-05` | `tests/stream.rs`; `wasapi_host.rs` |
 | `OUTPUT-REQ-10` | A matriz de suporte publicada é igual à gerada pelo código — implemented | `REQ-E01-02` | `TASK-E01-02` | `crates/vynamp-output/tests/support_matrix.rs` |
 | `OUTPUT-REQ-11` | Formato DSD nativo (`DsdNative`) distinto de `Dop` em `SampleFormat` e `StreamConfig` — planned (M5) | `REQ-E12-04` | `TASK-E12-04` | — |
 | `OUTPUT-REQ-12` | PCM 768 kHz anunciado e aberto quando o dispositivo suporta — planned (M5) | `REQ-E12-04` | `TASK-E12-04` | — |
@@ -271,7 +271,7 @@ cargo test --workspace
 
 | Limitação | Consequência | Quem cobre |
 |---|---|---|
-| Só os hosts `Null` e `Capture` existem | nenhum som sai num dispositivo real; `support()` devolve `None` para os hosts do OS | `specs/backends.md`, `TASK-E04-05` (M3) |
+| O host WASAPI existe (exclusivo) mas nunca rodou em hardware | `support(Wasapi, _)` é `Compiled`: o alvo compila, nada foi medido; as ACs de DAC ficam `#[ignore]` até um run real | `docs/hardware-matrix.md`, `TASK-E04-05` |
 | Todo recurso está em `LibraryVerified` | não há prova em hardware nem de integração | `docs/hardware-matrix.md`, `TASK-E04-06` |
 | `DsdNative` e PCM 768 kHz não existem | DSD só por DoP | `OUTPUT-REQ-11` e `OUTPUT-REQ-12`, `TASK-E12-04` (M5) |
 | `Stream::reconfigure(rate)` do design não existe | troca de taxa em exclusivo exige fechar e reabrir o stream | futura TASK de hosts reais |

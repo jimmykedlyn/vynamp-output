@@ -185,7 +185,7 @@ que valem desde já:
 | OUTPUT-BK-REQ-06 | A fachada lista hosts em ordem de preferência e diz qual escolheu e por quê. — implemented (só Null) | REQ de saída | E04-05 | `facade.rs` |
 | OUTPUT-BK-REQ-07 | A matriz de suporte é gerada do código e não pode divergir dele. — implemented | REQ de transparência | E04-05 | `support_matrix.rs` |
 | OUTPUT-BK-REQ-08 | Sem `unsafe` fora das crates `-sys` e do testkit. — implemented | REQ de segurança | E04-05 | lint do workspace (`unsafe_code = "forbid"`) |
-| OUTPUT-BK-REQ-09 | Backend WASAPI (compartilhado e exclusivo). — planned (M3) | REQ de saída bit-perfect | E04-05 | — |
+| OUTPUT-BK-REQ-09 | Backend WASAPI (compartilhado e exclusivo). — implemented (exclusivo); compila para `x86_64-pc-windows-msvc`, nunca rodou em hardware | REQ de saída bit-perfect | E04-05 | `crates/vynamp-output-wasapi-sys/tests/format.rs`; `crates/vynamp-output-core/tests/wasapi_format.rs`; job `wasapi` do CI |
 | OUTPUT-BK-REQ-10 | Backends ALSA, PipeWire, Pulse, CoreAudio e AAudio. — planned (M3) | REQ de saída por plataforma | E04-06 | — |
 | OUTPUT-BK-REQ-11 | Perfis por dispositivo. — planned (M3) | REQ de perfis | E04-09 | — |
 | OUTPUT-BK-REQ-12 | Saída Bluetooth. — planned (M3) | REQ de Bluetooth | E17-19 | — |
@@ -204,8 +204,8 @@ que valem desde já:
 | OUTPUT-BK-AC-08 | o relógio real | abrir, tocar e parar | entrega períodos sem erro | `null_host.rs::real_clock_smoke` |
 | OUTPUT-BK-AC-09 | um `VirtualClockHandle` | abrir um segundo stream com o primeiro ainda ativo | `InvalidRequest { what: "virtual clock already drives a stream" }`; depois de parar o primeiro, o novo abre e recebe os ticks | `stream.rs::a_virtual_clock_drives_one_stream_at_a_time` |
 | OUTPUT-BK-AC-10 | um `CaptureHost` cujo diretório não existe | `open` | `Error::Os { backend: Capture, .. }` | `capture.rs::unwritable_path_is_an_os_error` |
-| OUTPUT-BK-AC-11 | a fachada | `hosts()` | só `Null` | `facade.rs::hosts_lists_null_only` |
-| OUTPUT-BK-AC-12 | a fachada | `default_host()` | `Null`, com `HostSelection { chosen: Null, skipped: [] }` | `facade.rs::default_host_is_null_and_says_so` |
+| OUTPUT-BK-AC-11 | a fachada | `hosts()` | só `Null` onde nenhum backend de OS existe; no Windows, `Wasapi` antes de `Null` (`OUTPUT-AC-16`) | `facade.rs::hosts_lists_null_only_where_no_os_backend_exists` |
+| OUTPUT-BK-AC-12 | a fachada | `default_host()` | o primeiro de `hosts()`, com `skipped` listando os demais e o motivo; sem backend de OS, `Null` com `skipped: []` | `facade.rs::default_host_is_the_first_listed_and_says_so` |
 | OUTPUT-BK-AC-13 | `docs/support-matrix.md` commitado | gerar com `support_matrix_markdown()` | o texto é idêntico | `support_matrix.rs::committed_matrix_matches_generator` |
 | OUTPUT-BK-AC-14 | o alocador contador do testkit | alocar nesta thread / não alocar / alocar em outra thread | conta 1 / conta 0 / conta 0 aqui | `counting_alloc.rs::{counts_an_allocation_on_this_thread, no_allocation_is_counted_without_allocating, allocations_on_another_thread_are_not_counted_here}` |
 | OUTPUT-BK-AC-15 | um DAC USB ligado a um Linux x86_64 nativo com ALSA hw disponível (Camada 2) e PipeWire ativo na sessão, anunciando 24 bits válidos em 96 kHz e em 192 kHz | o cliente abre `ShareMode::Exclusive` pelo host `alsa`, uma vez a 96 000 Hz e outra a 192 000 Hz, e lê `stream.config()` e `config.path.os_mixer_bypassed`; em seguida a mesma abertura é tentada pelo host `pipewire`, e o modo efetivo devolvido é lido no `StreamConfig` | pelo ALSA o DAC negocia 24/96 e 24/192 sem mixer; pelo PipeWire o stream abre no modo que o servidor de fato conceder, e `config.mode` relata esse modo em vez de repetir o pedido (TASK-E12-01, TASK-E14-04-AC-2) | `alsa_exclusive.rs::dac_negotiates_24_96_and_24_192`, `pipewire.rs::negotiated_mode_is_reported_not_assumed` (`#[ignore]`, hardware) |
