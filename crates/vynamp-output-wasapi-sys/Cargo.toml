@@ -1,0 +1,23 @@
+[package]
+name = "vynamp-output-wasapi-sys"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Hand-written WASAPI/MMDevice FFI declarations and safe wrappers for vynamp-output"
+
+# Exception to the workspace `unsafe_code = "forbid"`: FFI lives here and
+# nowhere else (CONTRIBUTING.md, docs/ffi-safety.md). This crate does NOT opt
+# into `[lints] workspace = true` — `forbid` cannot be relaxed from inside a
+# crate, so the `-sys` exception is spelled out instead.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+[dependencies]
