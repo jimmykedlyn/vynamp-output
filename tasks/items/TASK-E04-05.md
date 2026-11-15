@@ -10,7 +10,7 @@
 | Módulo dono | `vynamp-output` |
 | Repo | `jimmykedlyn/vynamp-output` |
 | REQ coberto | `REQ-E04-05` |
-| Critérios da spec | `specs/output.md` §5 (`OUTPUT-AC-16` a `OUTPUT-AC-18`, rascunho não aprovado) |
+| Critérios da spec | `specs/output.md` §5 (`OUTPUT-AC-16` a `OUTPUT-AC-18`, aprovados em 2026-11-15) e `specs/backends.md` §5 (`OUTPUT-BK-AC-15` a `OUTPUT-BK-AC-19`, aprovados em 2026-11-15) |
 | Fase | M3 |
 | Prioridade | P1 |
 | Estado | planned |

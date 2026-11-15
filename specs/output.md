@@ -7,7 +7,7 @@
 | Tipo | lib |
 | Versão da spec | 0.2.0 |
 | Data | 2026-11-11 |
-| Estado | **rascunho autorado, não aprovado** — §3 a §10 escritos a partir do código e dos testes existentes; a aprovação é do mantenedor, por `GOVERNANCE.md` |
+| Estado | **§5 aprovada em 2026-11-15** pelo mantenedor, na abertura da `TASK-E04-05`, com escopo estendido a todas as plataformas — os critérios de DAC fora do Windows estão em `specs/backends.md` §5. As demais seções seguem rascunho autorado a partir do código e dos testes existentes: §3, §4, §6, §9 e §10 não foram aprovadas e não devem ser lidas como contrato. A aprovação é do mantenedor, por `GOVERNANCE.md` |
 | Dono | mantenedor do `vynamp-output` |
 | Depende de | `vynamp-dsp` (opcional, feature `resample`) |
 | É dependido por | engine |
@@ -178,16 +178,25 @@ pub trait RenderSource: Send + 'static {
 | `OUTPUT-AC-18` | um DAC USB aberto por `DeviceSelector::Id` em `ShareMode::Exclusive` e, ao lado, o alto-falante interno que o Windows expõe como default do role `Multimedia`, sem nenhuma preferência de fallback autorizada no perfil do dispositivo | o cabo do DAC é removido com o stream em `Running` e o cliente lê o `StreamState` final e a lista de dispositivos que o host tentou abrir ou abriu | sem fallback speaker automático (TASK-E04-05-AC-3) | `wasapi_exclusive.rs::unplug_does_not_fall_back_to_the_default_speaker` (`#[ignore]`, hardware) |
 
 > `OUTPUT-AC-16` a `OUTPUT-AC-18` foram autorados em 2026-11-15 a partir de
-> `TASK-E04-05` e **não estão aprovados**. O `Then` de cada linha é o critério
-> aprovado no backlog, copiado literal; `Given` e `When` são o enquadramento desta
-> spec. Os três exigem DAC USB e Windows 11 reais: nenhum roda neste ambiente, e
-> nenhum teste correspondente existe ainda.
+> `TASK-E04-05` e **aprovados pelo mantenedor no mesmo dia**, com uma extensão de
+> escopo: os critérios de DAC valem para Windows, Linux, macOS, Android e iOS, não
+> só para o WASAPI. O `Then` de cada linha é o critério aprovado no backlog,
+> copiado literal; `Given` e `When` são o enquadramento desta spec.
+>
+> **Estas três linhas são só o Windows.** As outras quatro plataformas estão em
+> `specs/backends.md` §5 (`OUTPUT-BK-AC-15` a `OUTPUT-BK-AC-18`), porque esta spec
+> fixa o contrato comum a todo host e aquela fixa o comportamento por host. A
+> matriz de DAC completa é `OUTPUT-AC-16` a `AC-18` mais aquelas quatro linhas;
+> nenhuma delas é repetida nas duas specs, para não divergirem na primeira edição.
+>
+> Os três exigem DAC USB e Windows 11 reais: nenhum roda neste ambiente, e nenhum
+> teste correspondente existe ainda.
 
 ### Critérios que esta spec **não** fixa
 
 - Os critérios de hardware de `TASK-E04-06`: captura S/PDIF, busy, unplug e sleep.
   Dependem dos hosts reais (`specs/backends.md`) e continuam `planned`. Os de
-  `TASK-E04-05` estão em `OUTPUT-AC-16` a `OUTPUT-AC-18`, escritos e não aprovados.
+  `TASK-E04-05` estão em `OUTPUT-AC-16` a `OUTPUT-AC-18`, aprovados em 2026-11-15.
 - Os critérios de `TASK-E04-06` AC-2/AC-3 (EQ, ReplayGain, selo de origem) e de
   `TASK-E04-09` (camadas de perfil, import de preset de fone). Esses são do player e do
   engine. Este módulo só fornece `PathProperties`, `DeviceId` e capacidades.
