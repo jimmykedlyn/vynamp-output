@@ -31,6 +31,8 @@ permissively licensed `windows` crate (see "Cross-check" below).
 | `IAudioClient::Initialize` (exclusive event mode needs `hnsBufferDuration == hnsPeriodicity != 0`; `AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED` retry) | <https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-initialize> |
 | Exclusive-mode streams (preemption, per-device user setting, no shared fallback) | <https://learn.microsoft.com/en-us/windows/win32/coreaudio/exclusive-mode-streams> |
 | MMDevice API overview (`CoCreateInstance(CLSID_MMDeviceEnumerator, …)`) | <https://learn.microsoft.com/en-us/windows/win32/coreaudio/mmdevice-api> |
+| `CoInitializeEx` return values (`S_OK`, `S_FALSE`, `RPC_E_CHANGED_MODE`) | <https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-coinitializeex> |
+| `RPC_E_CHANGED_MODE` = `0x80010106` ("Cannot change thread mode after it is set"), header `Winerror.h`/`rpcerror.h` | <https://learn.microsoft.com/en-us/windows/win32/com/com-error-codes-3> |
 
 ## Cross-check
 
@@ -46,6 +48,12 @@ generated from the SDK metadata:
 - `windows-sys` 0.61.2, same path: the `AUDCLNT_E_*` and `AUDCLNT_S_*`
   constants, `KSDATAFORMAT_SUBTYPE_PCM` / `_IEEE_FLOAT`, and
   `MMDeviceEnumerator`.
+
+`RPC_E_CHANGED_MODE` was checked the same way after a review found the
+constant declared as `0x800101C6`: the Microsoft page above states
+`0x80010106`, and `status.rs` now asserts that exact value in a test, so a
+wrong constant fails on Linux CI instead of only on a Windows thread that is
+already in an apartment.
 
 No code was copied from either crate; only the numeric values and the method
 order were read, and both are facts of the public ABI that the Microsoft

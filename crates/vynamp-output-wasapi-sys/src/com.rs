@@ -81,10 +81,10 @@ pub const CLSCTX_ALL: u32 = 0x17;
 /// `COINIT_MULTITHREADED`.
 pub const COINIT_MULTITHREADED: u32 = 0x0;
 
-/// `RPC_E_CHANGED_MODE`, which `CoInitializeEx` returns when the thread is
-/// already initialised in the other apartment. It is not a failure for us:
-/// COM is usable.
-pub const RPC_E_CHANGED_MODE: Hresult = Hresult(0x8001_01C6_u32 as i32);
+/// `RPC_E_CHANGED_MODE` (`0x80010106`, `rpcerror.h`), which
+/// `CoInitializeEx` returns when the thread is already initialised in the
+/// other apartment. It is not a failure for us: COM is usable.
+pub const RPC_E_CHANGED_MODE: Hresult = Hresult(0x8001_0106_u32 as i32);
 
 /// An owning reference to a COM object of interface `I`.
 ///

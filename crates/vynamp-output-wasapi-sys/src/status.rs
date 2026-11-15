@@ -56,8 +56,9 @@ impl Hresult {
     pub const COM_NOT_INITIALIZED: Hresult = Hresult(0x8004_01F0_u32 as i32);
     /// `E_NOTFOUND` (0x80070490): the OS has no default device for a role.
     pub const NOT_FOUND: Hresult = Hresult(0x8007_0490_u32 as i32);
-    /// `RPC_E_CHANGED_MODE`: the thread is already in the other apartment.
-    pub const RPC_CHANGED_MODE: Hresult = Hresult(0x8001_01C6_u32 as i32);
+    /// `RPC_E_CHANGED_MODE` (`0x80010106`, `rpcerror.h`): the thread is
+    /// already in the other apartment.
+    pub const RPC_CHANGED_MODE: Hresult = Hresult(0x8001_0106_u32 as i32);
 
     /// Whether the call succeeded (`>= 0`).
     pub const fn succeeded(self) -> bool {
@@ -201,6 +202,22 @@ mod tests {
             assert_eq!(Status::from_hresult(hr), want, "{hr:?}");
             assert!(hr.failed(), "{hr:?} must be a failure");
         }
+    }
+
+    #[test]
+    fn rpc_e_changed_mode_is_the_documented_value() {
+        // `rpcerror.h` documents `RPC_E_CHANGED_MODE` as `0x80010106`
+        // (cannot change thread mode after it is set), recorded in
+        // `docs/sources/wasapi.md`. The value is asserted numerically because
+        // the classification below is only right for that exact code: with
+        // any other value `Apartment::init` would treat a thread that is
+        // already in an apartment as a failure.
+        assert_eq!(Hresult::RPC_CHANGED_MODE.0, 0x8001_0106_u32 as i32);
+        assert_eq!(
+            Status::from_hresult(Hresult(0x8001_0106_u32 as i32)),
+            Status::ComNotInitialized,
+            "the documented code must classify as ComNotInitialized, not Other"
+        );
     }
 
     #[test]
