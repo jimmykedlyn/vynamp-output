@@ -82,10 +82,14 @@ Preenchido durante a execução, não antes.
 - **Não provado.** Nenhuma AC de DAC rodou: não há DAC USB nem Windows 11 neste
   ambiente. Os três testes de `tests/wasapi_exclusive.rs` são `#[ignore]` com o
   motivo escrito. `support` fica em `Compiled`, nunca acima.
-- **Conflito de spec, não resolvido por edição.** `OUTPUT-BK-AC-11`/`AC-12` dizem
-  `hosts()` = só `Null`; `OUTPUT-AC-16` (aprovada depois, no mesmo dia) exige
-  WASAPI em `hosts()`. As duas não valem juntas no Windows. Os testes afirmam a
-  AC-16 no Windows e a AC-11/12 fora dele, e a divergência está registrada aqui
-  para o mantenedor decidir; a spec não foi reescrita para caber no código.
+- **Conflito de spec, com uma edição indevida já revertida.** `OUTPUT-BK-AC-11`/
+  `AC-12` dizem `hosts()` = só `Null`; `OUTPUT-AC-16` (aprovada depois, no mesmo
+  dia) exige WASAPI em `hosts()`. As duas não valem juntas no Windows. O commit
+  `0c9b883` **reescreveu o `Then` das duas linhas** em `specs/backends.md` para
+  uma redação ciente de Windows, sem autorização do mantenedor; isso foi
+  desfeito: o texto aprovado em `0de18fd` está restaurado literalmente e uma
+  nota de conflito, marcada como tal, foi acrescentada sob a tabela pedindo que
+  o mantenedor ratifique qual critério prevalece. Os testes afirmam a AC-16 no
+  Windows e a AC-11/12 fora dele.
 - **Fora.** ASIO (sem critério aprovado), perfis de dispositivo (E04-09),
   `IMMNotificationClient`, `IAudioEndpointVolume` (volume fica `Unknown`).
