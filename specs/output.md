@@ -173,12 +173,21 @@ pub trait RenderSource: Send + 'static {
 | `OUTPUT-AC-13` | um dispositivo só DSD64 | DSD128 é pedido com `Downgrade` | abre DSD64 em DoP, nunca PCM | `dop.rs::dsd128_downgrades_to_dsd64_on_a_dsd64_only_device`; `negotiate.rs::dop_request_never_gets_pcm_nearest` |
 | `OUTPUT-AC-14` | um stream no `Null` | o host não sinaliza perda | `DeviceLost` nunca aparece; só o backend o produz | `stream.rs::device_lost_comes_only_from_the_backend` |
 | `OUTPUT-AC-15` | o código atual | `support_matrix_markdown()` roda | o resultado é igual a `docs/support-matrix.md` | `support_matrix.rs::committed_matrix_matches_generator` |
+| `OUTPUT-AC-16` | um DAC USB que anuncia 24 bits válidos em 96 kHz e em 192 kHz, ligado a uma máquina Windows 11, e um host WASAPI event-exclusive já presente na lista de `hosts()` do módulo | o cliente abre `ShareMode::Exclusive` com `DeviceSelector::Id` do DAC, `SampleFormat::I24Packed`, `Conversion::Forbid` e `OnUnavailable::Error`, uma vez a 96 000 Hz e outra a 192 000 Hz, e lê `stream.config()`, `config.valid_bits` e `config.path.os_mixer_bypassed` nos dois streams | 24/96 e 24/192 negociados em DAC (TASK-E04-05-AC-1) | `wasapi_exclusive.rs::dac_negotiates_24_96_and_24_192` (`#[ignore]`, hardware) |
+| `OUTPUT-AC-17` | um stream exclusivo I24Packed a 96 000 Hz tocando num DAC USB em Windows 11, com outro processo pronto para ocupar o mesmo dispositivo em exclusivo, o cabo USB ao alcance e a suspensão da máquina habilitada | as três condições são induzidas em sequência (busy do dispositivo, unplug do cabo e sleep seguido de resume), e depois de cada uma o cliente lê a fila de `Event` do `Stream`, o `StreamState` corrente e a posição apresentada, e chama `resume` depois que o dispositivo volta | busy/unplug/sleep recuperam com pausa (TASK-E04-05-AC-2) | `wasapi_exclusive.rs::busy_unplug_and_sleep_recover_with_pause` (`#[ignore]`, hardware) |
+| `OUTPUT-AC-18` | um DAC USB aberto por `DeviceSelector::Id` em `ShareMode::Exclusive` e, ao lado, o alto-falante interno que o Windows expõe como default do role `Multimedia`, sem nenhuma preferência de fallback autorizada no perfil do dispositivo | o cabo do DAC é removido com o stream em `Running` e o cliente lê o `StreamState` final e a lista de dispositivos que o host tentou abrir ou abriu | sem fallback speaker automático (TASK-E04-05-AC-3) | `wasapi_exclusive.rs::unplug_does_not_fall_back_to_the_default_speaker` (`#[ignore]`, hardware) |
+
+> `OUTPUT-AC-16` a `OUTPUT-AC-18` foram autorados em 2026-11-15 a partir de
+> `TASK-E04-05` e **não estão aprovados**. O `Then` de cada linha é o critério
+> aprovado no backlog, copiado literal; `Given` e `When` são o enquadramento desta
+> spec. Os três exigem DAC USB e Windows 11 reais: nenhum roda neste ambiente, e
+> nenhum teste correspondente existe ainda.
 
 ### Critérios que esta spec **não** fixa
 
-- Os critérios de hardware de `TASK-E04-05` e `TASK-E04-06`: DAC USB, captura S/PDIF,
-  busy, unplug e sleep. Eles dependem dos hosts reais (`specs/backends.md`) e
-  continuam `planned`.
+- Os critérios de hardware de `TASK-E04-06`: captura S/PDIF, busy, unplug e sleep.
+  Dependem dos hosts reais (`specs/backends.md`) e continuam `planned`. Os de
+  `TASK-E04-05` estão em `OUTPUT-AC-16` a `OUTPUT-AC-18`, escritos e não aprovados.
 - Os critérios de `TASK-E04-06` AC-2/AC-3 (EQ, ReplayGain, selo de origem) e de
   `TASK-E04-09` (camadas de perfil, import de preset de fone). Esses são do player e do
   engine. Este módulo só fornece `PathProperties`, `DeviceId` e capacidades.
