@@ -91,5 +91,13 @@ Preenchido durante a execução, não antes.
   nota de conflito, marcada como tal, foi acrescentada sob a tabela pedindo que
   o mantenedor ratifique qual critério prevalece. Os testes afirmam a AC-16 no
   Windows e a AC-11/12 fora dele.
+- **Conflito de spec na AC-17, declarado no teste.** O `Then` aprovado diz que
+  as três condições "recuperam com pausa"; a tabela de estados de `stream.rs`
+  recusa `pause` e `resume` a partir de `Lost`, e o backend entra em `Lost` em
+  todo código de device-gone. O teste
+  `busy_unplug_and_sleep_recover_with_pause` (nome mantido porque a §5 de
+  `specs/output.md` o cita como prova da AC-17) prova a recuperação real, por
+  reopen, e declara a divergência em vez de afirmar uma `pause` que não pode
+  suceder. A decisão — mudar o `Then` ou implementar a pausa — é do mantenedor.
 - **Fora.** ASIO (sem critério aprovado), perfis de dispositivo (E04-09),
   `IMMNotificationClient`, `IAudioEndpointVolume` (volume fica `Unknown`).

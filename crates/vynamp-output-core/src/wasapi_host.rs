@@ -447,10 +447,12 @@ impl BackendStream for WasapiBackend {
 
     fn stop(&mut self) -> Result<(), Error> {
         self.flags.exit.store(true, Ordering::Release);
-        // `IAudioClient::Stop` makes the OS signal the stream's event, which
-        // is what the device thread is blocked on in `wait_period`; without
-        // it the thread would sit out the 2 s `WaitForSingleObject` timeout
-        // before it re-reads `exit`. `unpark` below cannot wake that wait.
+        // We expect `IAudioClient::Stop` to make the OS signal the stream's
+        // event, which is what the device thread is blocked on in
+        // `wait_period`; Microsoft does not document that, so it is an
+        // assumption, not a fact. If it does not hold, the thread sits out
+        // the bounded 2 s `WaitForSingleObject` timeout before it re-reads
+        // `exit`, which is the fallback. `unpark` below cannot wake that wait.
         let status = self.stream.stop();
         if let Some(h) = self.device.take() {
             h.thread().unpark();

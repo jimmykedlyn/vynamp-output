@@ -5,7 +5,7 @@ reviews (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 | Crate | Invariants | Opus review (date, PR) |
 |-------|------------|------------------------|
-| `vynamp-output-wasapi-sys` | see below | **pending** — required before merge |
+| `vynamp-output-wasapi-sys` | see below | 2026-11-15, two clean-context Opus reviews: round 1 at `1b3f442` **CHANGES REQUIRED** (5 blocking findings); round 2 at `b0cec68` **APPROVE WITH NITS** (all 5 fixed, no new blocking findings). PR: ainda não aberto (branch `feature/task-e04-05-claude-wasapi-exclusive`) |
 
 ## `vynamp-output-wasapi-sys`
 
@@ -65,6 +65,13 @@ CI.
    `Status`; the backend matches on `Status`, never on a numeric code.
 
 ### What is not proven here
+
+**The review is not a proof of correctness either.** Two clean-context Opus
+reviews ran on 2026-11-15: round 1 at `1b3f442` returned **CHANGES REQUIRED**
+with five blocking findings; round 2 at `b0cec68` returned **APPROVE WITH
+NITS**, with all five fixed and no new blocking findings. The nits round 2
+raised are documentation-level and were fixed after that SHA, in this branch;
+the PR is still not open (`feature/task-e04-05-claude-wasapi-exclusive`).
 
 The crate compiles for `x86_64-pc-windows-msvc` in CI, and the pure parts are
 tested on Linux. **Nothing in this crate has run against a real device.** The

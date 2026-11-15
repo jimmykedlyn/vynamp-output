@@ -20,6 +20,11 @@
 //! Without that variable the test fails with the instruction instead of
 //! pretending the step happened. Nothing is asserted about a condition the
 //! test did not observe.
+//!
+//! Before inducing anything, the operator must wait for audible playback: the
+//! tests assert that the presented position advanced past zero, which only
+//! holds once at least one period has played. Inducing within the first period
+//! makes that assertion fail spuriously.
 
 #![cfg(target_os = "windows")]
 
@@ -92,7 +97,7 @@ fn operator_step(step: &str) {
     });
     let marker: PathBuf = PathBuf::from(dir).join(format!("{step}.done"));
     eprintln!(
-        "OUTPUT-AC-17: induce `{step}` now, then create {}",
+        "OUTPUT-AC-17: wait for audible playback, then induce `{step}` and create {}",
         marker.display()
     );
     let deadline = Instant::now() + OPERATOR_TIMEOUT;

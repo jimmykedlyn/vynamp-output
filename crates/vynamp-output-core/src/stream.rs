@@ -143,10 +143,12 @@ impl Stream {
 
     /// Every device this host tried to open for this stream, in order.
     ///
-    /// The backend appends to it on each open attempt, so it is evidence and
-    /// not a restatement of the request: a host that tried the DAC, failed
-    /// and fell back to the default speaker reports both ids here. An empty
-    /// list means no attempt was recorded (a backend that does not fill it).
+    /// The backend records the endpoint it actually opened, at the single
+    /// point where it opens it; it is evidence and not a restatement of the
+    /// request. A host that falls back must append the second id itself, and
+    /// today neither backend has a fallback path, so the list holds one id.
+    /// An empty list means no attempt was recorded (a backend that does not
+    /// fill it).
     ///
     /// It is what `OUTPUT-AC-18` and `OUTPUT-BK-AC-19` read when they require
     /// "a lista de dispositivos que o host tentou abrir ou abriu".
