@@ -216,39 +216,6 @@ impl ExclusiveStream {
         Ok(())
     }
 
-    /// Waits for one period and copies it into `dst` as raw interleaved
-    /// bytes in the stream's format.
-    ///
-    /// Returns the number of frames written. `dst` must hold at least
-    /// `period_frames * block_align` bytes; a shorter buffer writes nothing.
-    /// Kept for callers that want the wait and the copy together.
-    pub fn next_period(&self, dst: &mut [u8]) -> Result<u32, Status> {
-        let frames = self.format.period_frames;
-        let want = frames as usize * usize::from(self.format.format.block_align());
-        if dst.len() < want {
-            return Err(Status::InvalidArgument);
-        }
-        let status = self.wait_period();
-        if !status.is_ok() {
-            return Err(status);
-        }
-        // SAFETY: `self.render` is a live render client, and `frames` is the
-        // period the OS granted for this stream, so `GetBuffer` returns a
-        // pointer valid for `want` bytes until the matching `ReleaseBuffer`.
-        let src = unsafe { self.render.get_buffer(frames) }.map_err(Status::from_hresult)?;
-        // SAFETY: as above, `src` is valid for `want` bytes; `dst` is at
-        // least `want` bytes (checked above) and does not overlap `src`,
-        // which lives in OS-owned memory.
-        unsafe {
-            std::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), want);
-        }
-        let released = Status::from_hresult(self.render.release_buffer(frames, 0));
-        if !released.is_ok() {
-            return Err(released);
-        }
-        Ok(frames)
-    }
-
     /// Opens `raw` with `req`.
     fn open_on(raw: ComPtr<mmdevice::ImmDevice>, req: OpenRequest) -> Result<Self, OpenError> {
         let client = raw

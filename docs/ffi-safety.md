@@ -45,10 +45,11 @@ CI.
 3. **`Hresult` is `#[repr(transparent)]` over `i32`.** It appears directly in
    `extern "system"` signatures, so it must be ABI-identical to `LONG`.
 4. **`GetBuffer`/`ReleaseBuffer` are paired.** `ExclusiveStream::write_period`
-   and `next_period` call `GetBuffer`, copy exactly
-   `period_frames * block_align` bytes, and call `ReleaseBuffer` with the same
-   frame count. The pointer is never stored, never returned, and never held
-   across a call.
+   calls `GetBuffer`, copies exactly `period_frames * block_align` bytes, and
+   calls `ReleaseBuffer` with the same frame count. The pointer is never
+   stored, never returned, and never held across a call. (The public
+   `next_period` that read the buffer *out* of the device was removed: it was
+   unused, and reading a write-only render buffer returned garbage.)
 5. **The event handle is owned by the stream.** `CreateEventW` in `open`,
    `CloseHandle` in `Drop` and on every error path after creation. It is
    closed exactly once.
