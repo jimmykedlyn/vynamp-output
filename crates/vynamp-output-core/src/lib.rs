@@ -32,6 +32,7 @@ mod format;
 mod host;
 mod negotiate;
 mod null;
+pub mod preference;
 mod render;
 mod request;
 #[cfg(feature = "capture")]
@@ -42,6 +43,9 @@ mod rtflags;
 mod silence;
 mod stream;
 mod support;
+pub mod wasapi;
+#[cfg(all(target_os = "windows", feature = "wasapi"))]
+mod wasapi_host;
 mod watcher;
 #[cfg(test)]
 mod zero_alloc_tests;
@@ -56,6 +60,7 @@ pub use format::{ChannelLayout, ChannelPosition, HostId, Justify, SampleFormat};
 pub use host::{DeviceInfo, Host, abandoned_enumeration_threads, enumerate_with_timeout};
 pub use negotiate::{Capabilities, CapabilityEntry, CapabilityOrigin, Negotiated, negotiate};
 pub use null::{NullClock, NullHost, VirtualClockHandle, default_capability_entries};
+pub use preference::{Preference, candidates};
 pub use render::{
     DeviceBuffer, MonotonicNanos, PresentationTiming, RenderContext, RenderSource, Rendered,
     TimingSource,
@@ -66,3 +71,6 @@ pub use request::{
 };
 pub use stream::{Counters, DrainOutcome, Stream, StreamState};
 pub use support::{Feature, VerificationLevel, support};
+pub use wasapi::{SampleKind, WasapiFormat, channel_mask, to_wasapi};
+#[cfg(all(target_os = "windows", feature = "wasapi"))]
+pub use wasapi_host::WasapiHost;
