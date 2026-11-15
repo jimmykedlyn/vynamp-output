@@ -119,9 +119,10 @@ fn busy_unplug_and_sleep_recover_with_pause() {
         position.is_some(),
         "the presented position must still be readable"
     );
-    // After the device returns, resume rather than reopen somewhere else.
-    let _ = stream.resume();
-    let _ = Duration::from_millis(0);
+    // After the device returns, recovery is a new `open` on the same device
+    // id, never a silent switch: a `Lost` stream refuses `resume` (the state
+    // table says so), so the operator stops it and reopens.
+    stream.stop().expect("stop the lost stream");
 }
 
 #[test]
@@ -135,12 +136,14 @@ fn unplug_does_not_fall_back_to_the_default_speaker() {
 
     // The operator pulls the cable with the stream running; the state must
     // become `Lost` and the library must not have opened another device.
-    let events: Vec<Event> = stream.events().iter().collect();
+    // `recv_timeout` rather than `iter()`: the latter would block forever if
+    // `DeviceLost` never came, turning a missing event into a hung test.
+    let lost = stream
+        .events()
+        .recv_timeout(Duration::from_secs(5))
+        .expect("DeviceLost within 5 s of the unplug");
+    assert_eq!(lost, Event::DeviceLost);
     assert_eq!(stream.state(), StreamState::Lost);
-    assert!(
-        events.iter().any(|e| matches!(e, Event::DeviceLost)),
-        "loss is reported, got {events:?}"
-    );
     // No fallback: the only device the stream ever opened is the one the
     // request named, and the failure is `DeviceLost`, not a silent switch to
     // the `Multimedia` default speaker.
