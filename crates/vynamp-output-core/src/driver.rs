@@ -115,30 +115,35 @@ pub(crate) struct Driver<C, K> {
     dop_phase: bool,
 }
 
-impl<C: PeriodClock, K: PeriodSink> Driver<C, K> {
-    /// The same driver with a new clock and sink, and the same source, buffers
-    /// and delivery position.
-    ///
-    /// Recovery uses this after a loss: the OS stream object is new, so its
-    /// clock and sink are new too, but the `RenderSource`, the pre-allocated
-    /// period buffers and `device_frame` must not be rebuilt (ADR-002).
-    /// `sink` receives the old sink, so a new sink can take over the buffers
-    /// it owned. Called on the control thread, between the old device thread
-    /// returning the driver and the new one starting; never concurrently with
-    /// a tick.
-    ///
-    /// Only the WASAPI backend needs it today (the Null/Capture device never
-    /// really goes away, so their recovery reuses the same clock and sink);
-    /// it is compiled on every target so the contract is testable there.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub(crate) fn rebind<C2: PeriodClock, K2: PeriodSink>(
-        self,
-        clock: C2,
-        sink: impl FnOnce(K) -> K2,
-    ) -> Driver<C2, K2> {
+/// The part of a [`Driver`] that does not belong to a device: the source, the
+/// pre-allocated period buffers and the delivery position.
+///
+/// Recovery splits the driver here because the OS device handle lives in the
+/// clock and the sink, and reopening the same device requires releasing every
+/// handle to the old one first — an exclusive client the OS still counts as a
+/// client of the endpoint makes `Initialize` fail with `DEVICE_IN_USE`.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) struct DriverCore {
+    pub(crate) source: Box<dyn RenderSource>,
+    pub(crate) flags: Arc<RtFlags>,
+    pub(crate) config: StreamConfig,
+    pub(crate) native: NativeBuf,
+    pub(crate) pipeline: Pipeline,
+    /// Latency reported in the timing snapshot.
+    pub(crate) latency_frames: u64,
+    device_frame: u64,
+    source_state: SourceState,
+    dop_phase: bool,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+impl DriverCore {
+    /// A driver for a device: the given clock and sink, and the source,
+    /// buffers and delivery position carried over from the loss.
+    pub(crate) fn attach<C: PeriodClock, K: PeriodSink>(self, clock: C, sink: K) -> Driver<C, K> {
         Driver {
             clock,
-            sink: sink(self.sink),
+            sink,
             source: self.source,
             flags: self.flags,
             config: self.config,
@@ -149,6 +154,45 @@ impl<C: PeriodClock, K: PeriodSink> Driver<C, K> {
             source_state: self.source_state,
             dop_phase: self.dop_phase,
         }
+    }
+}
+
+impl<C: PeriodClock, K: PeriodSink> Driver<C, K> {
+    /// Splits the driver: drops the clock (which holds the device handle),
+    /// returns the device-free core and hands the sink to the caller, so its
+    /// pre-allocated buffers survive while every handle to the old stream is
+    /// released before a reopen.
+    ///
+    /// Called on the control thread, after the old device thread returned its
+    /// driver and before the reopen; never concurrently with a tick.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn release_device(self) -> (DriverCore, K) {
+        let Driver {
+            clock,
+            sink,
+            source,
+            flags,
+            config,
+            native,
+            pipeline,
+            latency_frames,
+            device_frame,
+            source_state,
+            dop_phase,
+        } = self;
+        drop(clock);
+        let core = DriverCore {
+            source,
+            flags,
+            config,
+            native,
+            pipeline,
+            latency_frames,
+            device_frame,
+            source_state,
+            dop_phase,
+        };
+        (core, sink)
     }
 
     #[allow(clippy::too_many_arguments)]
