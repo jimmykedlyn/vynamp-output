@@ -27,7 +27,15 @@ pub(crate) struct RtFlags {
     pub(crate) frames_delivered: AtomicU64,
     pub(crate) callbacks: AtomicU64,
     pub(crate) source_panicked: AtomicBool,
+    /// The stream is currently lost, and no recovery has cleared it yet.
+    /// Set by [`RtFlags::notify_lost`], cleared by
+    /// [`RtFlags::clear_lost`] on the control thread.
     pub(crate) lost: AtomicBool,
+    /// How many loss notifications the backend has raised. The watcher emits
+    /// one `DeviceLost` per increment, so clearing `lost` on recovery does not
+    /// swallow the next loss, and a loss that is recovered between two polls
+    /// is still reported.
+    pub(crate) lost_seq: AtomicU64,
     /// The source reported end of stream; `last_content_frame` is valid.
     pub(crate) end_of_stream: AtomicBool,
     /// Exclusive end of the content: the first device frame after it.
@@ -36,6 +44,9 @@ pub(crate) struct RtFlags {
     pub(crate) ticks: AtomicU64,
     /// Last `ticks` value the watcher has turned into events.
     pub(crate) watched_ticks: AtomicU64,
+    /// Last `lost_seq` value the watcher has turned into a `DeviceLost`
+    /// event; what a lost device thread waits for before it returns.
+    pub(crate) watched_losses: AtomicU64,
     /// Asks the device thread to leave its loop.
     pub(crate) exit: AtomicBool,
     pub(crate) device_exited: AtomicBool,
@@ -54,10 +65,12 @@ impl RtFlags {
             callbacks: AtomicU64::new(0),
             source_panicked: AtomicBool::new(false),
             lost: AtomicBool::new(false),
+            lost_seq: AtomicU64::new(0),
             end_of_stream: AtomicBool::new(false),
             last_content_frame: AtomicU64::new(0),
             ticks: AtomicU64::new(0),
             watched_ticks: AtomicU64::new(0),
+            watched_losses: AtomicU64::new(0),
             exit: AtomicBool::new(false),
             device_exited: AtomicBool::new(false),
             watcher_exit: AtomicBool::new(false),
@@ -94,11 +107,21 @@ impl RtFlags {
             ) {
                 Ok(_) => {
                     self.lost.store(true, Ordering::Release);
+                    self.lost_seq.fetch_add(1, Ordering::Release);
                     return;
                 }
                 Err(now) => cur = now,
             }
         }
+    }
+
+    /// Recovery: the device was reopened, so the stream is no longer lost.
+    ///
+    /// Clears `lost` (otherwise the watcher would treat the next loss as
+    /// already reported) and leaves `lost_seq` alone, so the count of losses
+    /// the watcher has to report is never rewound. Control thread only.
+    pub(crate) fn clear_lost(&self) {
+        self.lost.store(false, Ordering::Release);
     }
 
     /// Records the end of the content (single writer: the device thread).

@@ -24,7 +24,9 @@ struct Seen {
     underruns: u64,
     xruns: u64,
     panicked: bool,
-    lost: bool,
+    /// Losses already reported, from `flags.lost_seq` — a count, not a flag,
+    /// so a recovery that clears `lost` cannot hide the next loss.
+    losses: u64,
 }
 
 impl Seen {
@@ -48,10 +50,12 @@ impl Seen {
             self.panicked = true;
             let _ = tx.send(Event::SourcePanicked);
         }
-        if !self.lost && flags.lost.load(Ordering::Acquire) {
-            self.lost = true;
+        let losses = flags.lost_seq.load(Ordering::Acquire);
+        if losses > self.losses {
+            self.losses = losses;
             let _ = tx.send(Event::DeviceLost);
         }
+        flags.watched_losses.store(self.losses, Ordering::Release);
     }
 }
 
