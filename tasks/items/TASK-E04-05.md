@@ -103,3 +103,24 @@ Preenchido durante a execução, não antes.
   depois `resume`, sem reopen.
 - **Fora.** ASIO (sem critério aprovado), perfis de dispositivo (E04-09),
   `IMMNotificationClient`, `IAudioEndpointVolume` (volume fica `Unknown`).
+
+### 2026-11-16 — rodada 3 (decisões ratificadas)
+
+- **Decisões do mantenedor, implementadas.** (a) `OUTPUT-AC-16` prevalece no
+  Windows: `hosts()`/`default_host()` incluem WASAPI no Windows e a nota de
+  conflito com `OUTPUT-BK-AC-11`/`AC-12` foi removida. (b) `Lost --pause--> Paused`
+  é recuperação válida: `pause` a partir de `Lost` reabre o mesmo dispositivo e
+  devolve `Paused`, `resume` a partir de `Lost` continua inválido. A decisão está
+  registrada em `docs/adr/ADR-002-lost-recovery.md`.
+- **Mecanismo.** O respawn é feito pelo `JoinHandle` do thread de stream, sem
+  segurar lock no caminho de tempo real.
+- **Review.** O review de contexto limpo (`9def89f..57d7c67`) aprovou sem achado
+  bloqueante. O achado de ordem em `WasapiBackend::recover` — abrir com o cliente
+  exclusivo antigo ainda vivo podia devolver `AUDCLNT_E_DEVICE_IN_USE` e travar o
+  stream em `Lost` — foi corrigido (liberar o device antes de reabrir) antes do push.
+- **Prova.** A recuperação é provada no backend `Null`, em Linux. O caminho WASAPI
+  é provado só por compilação: nada rodou em hardware (continua sem DAC USB e sem
+  Windows 11). `support(Wasapi, _)` continua `Compiled`.
+- **PR.** O trabalho está no PR [#20](https://github.com/jimmykedlyn/vynamp-output/pull/20);
+  a rodada 1 e 2 foram mergeadas antes como PR #19.
+
