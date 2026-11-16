@@ -25,7 +25,8 @@ use std::thread::{self, JoinHandle};
 
 use crate::config::{EndpointVolume, PathProperties, RtPriority, StreamConfig, Transport, Tri};
 use crate::driver::{
-    Driver, NativeBuf, PeriodClock, PeriodSink, Pipeline, discard_driver, run_device_thread,
+    Driver, DriverCore, NativeBuf, PeriodClock, PeriodSink, Pipeline, discard_driver,
+    run_device_thread,
 };
 use crate::error::Error;
 use crate::event::Event;
@@ -446,9 +447,16 @@ fn write_native(period: &NativeBuf, dst: &mut [u8]) -> usize {
 struct WasapiBackend {
     /// The stream object the live device thread is using. Owned here too so
     /// `start`/`pause`/`stop` can reach `IAudioClient` from the control
-    /// thread; the device thread holds its own clone.
+    /// thread; the device thread holds its own clone. `None` while no device
+    /// is open — after a loss, until a recovery succeeds.
     stream: Option<Arc<sys::ExclusiveStream>>,
     device: Option<JoinHandle<Option<Driver<WasapiClock, WasapiSink>>>>,
+    /// The device-free part of the driver (source, pre-allocated buffers,
+    /// delivery position) and the sink's period bytes, kept across a failed
+    /// recovery so the next `pause` retries with the same source. Closed as a
+    /// pair: a retry needs both, and neither is present while a device is
+    /// open or after `stop`.
+    core: Option<(DriverCore, Box<[u8]>)>,
     flags: Arc<RtFlags>,
     /// What `open` asked the OS for, kept so recovery reopens the same
     /// endpoint with the same format and period (`OUTPUT-REQ-09`).
@@ -517,40 +525,68 @@ impl BackendStream for WasapiBackend {
         }
     }
 
-    /// Reopens **the same** endpoint with the request recorded at open, joins
-    /// the thread that left on the loss and starts a new one with the driver
-    /// it handed back.
+    /// Joins the thread that left on the loss, releases every handle to the
+    /// old OS stream, then reopens **the same** endpoint with the request
+    /// recorded at open and starts a new thread with the driver it handed
+    /// back.
+    ///
+    /// The order matters: an exclusive client the OS still counts as a client
+    /// of the endpoint makes `Initialize` fail with `AUDCLNT_E_DEVICE_IN_USE`,
+    /// so the old clock and sink (and this backend's own `stream`) are all
+    /// dropped *before* the open, not after.
     ///
     /// If the endpoint is still gone the open fails, nothing is respawned,
-    /// `lost` stays set and the stream stays `Lost` — the caller may retry
-    /// `pause` later.
+    /// `lost` stays set and the stream stays `Lost` — but the `DriverCore`
+    /// goes back into `self.core`, so the next `pause` retries with the same
+    /// `RenderSource` and the same pre-allocated buffers.
     fn recover(&mut self) -> Result<(), Error> {
-        let enumerator = WasapiHost::enumerator()?;
-        let stream = sys::ExclusiveStream::open(&enumerator, &self.device_id, self.request)
-            .map_err(open_error)?;
+        let (core, bytes) = match self.join_device().map(Driver::release_device) {
+            Some((core, old_sink)) => (core, old_sink.bytes),
+            // A previous attempt already joined the thread and released the
+            // device; it kept the core and the period bytes for this retry.
+            None => self.core.take().ok_or(Error::DeviceLost)?,
+        };
+        // Every handle to the old stream is gone from now on: the old clock
+        // and sink went with the driver, and the backend's own copy goes too.
+        self.stream = None;
+
+        // Every failure below puts the core back before returning, so the
+        // next `pause` retries with the same source instead of losing it.
+        let opened = WasapiHost::enumerator().and_then(|enumerator| {
+            sys::ExclusiveStream::open(&enumerator, &self.device_id, self.request)
+                .map_err(open_error)
+        });
+        let stream = match opened {
+            Ok(stream) => stream,
+            Err(e) => {
+                self.core = Some((core, bytes));
+                return Err(e);
+            }
+        };
         let id = DeviceId(self.device_id.0.clone());
         if self.open_attempts.last() != Some(&id) {
             self.open_attempts.push(id);
         }
-        let Some(driver) = self.join_device() else {
-            return Err(Error::DeviceLost);
-        };
         let stream = Arc::new(stream);
         let flags = self.flags.clone();
-        let driver = driver.rebind(
+        let driver = core.attach(
             WasapiClock {
                 stream: stream.clone(),
             },
-            |old: WasapiSink| WasapiSink {
+            WasapiSink {
                 stream: stream.clone(),
-                bytes: old.bytes,
+                bytes,
                 flags,
             },
         );
+        // The spawn is the last step that can fail, and a failed spawn loses
+        // the driver with the closure: the stream stays `Lost` and the next
+        // `pause` reports `DeviceLost` instead of retrying.
+        let handle = self.spawn_device(driver)?;
         self.stream = Some(stream);
+        self.device = Some(handle);
         self.flags.clear_lost();
         self.flags.device_exited.store(false, Ordering::Release);
-        self.device = Some(self.spawn_device(driver)?);
         Ok(())
     }
 
@@ -572,6 +608,8 @@ impl BackendStream for WasapiBackend {
         }
         discard_driver(self.join_device());
         self.stream = None;
+        // A stopped stream is not retryable: drop what a failed recovery kept.
+        self.core = None;
         match status {
             Some(s) if !s.is_ok() => Err(os_error("IAudioClient::Stop", s)),
             _ => Ok(()),
@@ -654,6 +692,7 @@ fn launch(
     let backend = WasapiBackend {
         stream: Some(stream),
         device: Some(device),
+        core: None,
         flags: flags.clone(),
         request: open_request,
         device_id,
