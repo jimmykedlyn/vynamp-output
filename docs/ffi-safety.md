@@ -5,7 +5,7 @@ reviews (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 | Crate | Invariants | Opus review (date, PR) |
 |-------|------------|------------------------|
-| `vynamp-output-wasapi-sys` | see below | 2026-11-15, two clean-context Opus reviews: round 1 at `1b3f442` **CHANGES REQUIRED** (5 blocking findings); round 2 at `b0cec68` **APPROVE WITH NITS** (all 5 fixed, no new blocking findings). PR: [#19](https://github.com/jimmykedlyn/vynamp-output/pull/19) |
+| `vynamp-output-wasapi-sys` | see below | 2026-11-15, two clean-context Opus reviews: round 1 at `1b3f442` **CHANGES REQUIRED** (5 blocking findings); round 2 at `b0cec68` **APPROVE WITH NITS** (all 5 fixed, no new blocking findings), merged as PR [#19](https://github.com/jimmykedlyn/vynamp-output/pull/19); round 3 at `9def89f..57d7c67` **no blocking findings**, with the ordering finding in `WasapiBackend::recover` fixed afterwards. Current PR: [#20](https://github.com/jimmykedlyn/vynamp-output/pull/20) |
 
 ## `vynamp-output-wasapi-sys`
 
@@ -70,8 +70,15 @@ CI.
 reviews ran on 2026-11-15: round 1 at `1b3f442` returned **CHANGES REQUIRED**
 with five blocking findings; round 2 at `b0cec68` returned **APPROVE WITH
 NITS**, with all five fixed and no new blocking findings. The nits round 2
-raised are documentation-level and were fixed after that SHA, in this branch;
-the PR is still not open (`feature/task-e04-05-claude-wasapi-exclusive`).
+raised are documentation-level and were fixed after that SHA; that work was
+merged as PR [#19](https://github.com/jimmykedlyn/vynamp-output/pull/19). A
+third clean-context Opus review ran on 2026-11-16 over `9def89f..57d7c67` and
+returned **no blocking findings**; the one ordering finding it raised in
+`WasapiBackend::recover` (reopening with the old exclusive client still alive
+could return `AUDCLNT_E_DEVICE_IN_USE` and leave the stream stuck in `Lost`)
+was fixed before the push. That follow-up is PR
+[#20](https://github.com/jimmykedlyn/vynamp-output/pull/20), open against
+`develop`.
 
 The crate compiles for `x86_64-pc-windows-msvc` in CI, and the pure parts are
 tested on Linux. **Nothing in this crate has run against a real device.** The
