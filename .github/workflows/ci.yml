@@ -53,6 +53,26 @@ jobs:
         run: rustup show
       - run: cargo test --workspace --locked
 
+  # O backend WASAPI so existe em `cfg(target_os = "windows")`, entao o job
+  # `test` acima (ubuntu) nunca o compila. Este job e o que sustenta a
+  # afirmacao `compiled` da linha wasapi em `docs/support-matrix.md`: sem ele,
+  # `support(HostId::Wasapi, _)` prometeria algo que nenhum run verificou.
+  # Nao roda teste nem link: so type-check do alvo, que e o que `compiled`
+  # significa. O runner nao tem MSVC linker, e nao precisa.
+  wasapi:
+    needs: clippy
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Provision pinned Rust toolchain
+        run: rustup show
+      - name: Add the Windows target
+        run: rustup target add x86_64-pc-windows-msvc
+      - name: Type-check the WASAPI backend for Windows
+        run: cargo check --workspace --all-targets --locked --target x86_64-pc-windows-msvc
+
   # `cargo-machete` nao vem no toolchain fixado. Ausente, o passo registra e
   # segue: AGENTS.md 3 trata dependencia nao usada como achado de review, nao
   # como gate. Se um dia entrar no toolchain, o comando passa a valer sozinho.
@@ -70,7 +90,7 @@ jobs:
   gate:
     name: CI Gate
     if: always()
-    needs: [fmt, clippy, test, machete]
+    needs: [fmt, clippy, test, wasapi, machete]
     runs-on: ubuntu-22.04
     steps:
       - name: Aggregate
@@ -79,5 +99,6 @@ jobs:
           test "${{ needs.fmt.result }}" = success
           test "${{ needs.clippy.result }}" = success
           test "${{ needs.test.result }}" = success
+          test "${{ needs.wasapi.result }}" = success
           test "${{ needs.machete.result }}" = success
           echo 'CI Gate passed.'

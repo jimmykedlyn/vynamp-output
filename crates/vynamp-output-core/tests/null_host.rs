@@ -31,6 +31,34 @@ fn ramp() -> Box<dyn RenderSource> {
 }
 
 #[test]
+fn open_attempts_records_the_device_the_backend_opened() {
+    // `OUTPUT-AC-18` reads "a lista de dispositivos que o host tentou abrir
+    // ou abriu". The list must come from the backend, so this asserts it is
+    // populated here, on a host whose only device is `null`, and not left
+    // empty or copied from an unrelated source.
+    let (_clock, host) = virtual_host();
+    let mut stream = host
+        .open(&request(48_000, BufferRequest::Frames(64)), ramp())
+        .unwrap();
+    assert_eq!(stream.open_attempts(), &[DeviceId("null".into())]);
+
+    // An explicit id that does not exist is refused before any open, and
+    // there is no stream to report attempts from: the host never opens a
+    // device other than the one asked for.
+    let mut req = request(48_000, BufferRequest::Frames(64));
+    req.device = DeviceSelector::Id(DeviceId("speaker".into()));
+    assert_eq!(host.open(&req, ramp()).unwrap_err(), Error::DeviceNotFound);
+
+    // A second stream on the same clock, after the first stops, records its
+    // own attempt (the list belongs to the stream, not to the process).
+    stream.stop().unwrap();
+    let second = host
+        .open(&request(48_000, BufferRequest::Frames(64)), ramp())
+        .unwrap();
+    assert_eq!(second.open_attempts(), &[DeviceId("null".into())]);
+}
+
+#[test]
 fn one_virtual_device_for_every_role() {
     let (_c, host) = virtual_host();
     assert_eq!(host.id(), HostId::Null);

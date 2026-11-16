@@ -8,7 +8,7 @@ Each cell is the strongest verification level the host declares for the feature
 
 | host | shared | exclusive | integer PCM | DoP | timing | events |
 |---|---|---|---|---|---|---|
-| wasapi | - | - | - | - | - | - |
+| wasapi | compiled | compiled | compiled | - | compiled | compiled |
 | alsa | - | - | - | - | - | - |
 | pipewire | - | - | - | - | - | - |
 | pulse | - | - | - | - | - | - |

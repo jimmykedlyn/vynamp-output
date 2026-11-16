@@ -7,7 +7,7 @@
 | Tipo | lib |
 | Versão da spec | 0.2.0 |
 | Data | 2026-11-11 |
-| Estado | **rascunho autorado, não aprovado** — §3 a §10 escritos a partir do código e dos testes existentes; a aprovação é do mantenedor, por `GOVERNANCE.md` |
+| Estado | **§5 aprovada em 2026-11-15** pelo mantenedor, na abertura da `TASK-E04-05`, com escopo estendido a todas as plataformas — os critérios de DAC fora do Windows estão em `specs/backends.md` §5. As demais seções seguem rascunho autorado a partir do código e dos testes existentes: §3, §4, §6, §9 e §10 não foram aprovadas e não devem ser lidas como contrato. A aprovação é do mantenedor, por `GOVERNANCE.md` |
 | Dono | mantenedor do `vynamp-output` |
 | Depende de | `vynamp-dsp` (opcional, feature `resample`) |
 | É dependido por | engine |
@@ -147,7 +147,7 @@ pub trait RenderSource: Send + 'static {
 | `OUTPUT-REQ-06` | PCM inteiro (I24Packed, I32 com bits válidos, F32) chega bit a bit ao ponto de captura, sem troca de canais — implemented no host `Capture`; planned (M3) em hardware | `REQ-E04-06` | `TASK-E04-06` | `tests/capture.rs` |
 | `OUTPUT-REQ-07` | DoP DSD64/128/256 em 176,4/352,8/705,6 kHz, com marcador contínuo através de períodos e underrun, e recusado em caminho misto, desconhecido, shared, com volume não unity ou com conversão — implemented | `REQ-E12-04` | `TASK-E12-04` | `tests/dop.rs` |
 | `OUTPUT-REQ-08` | Máquina de estados fixa; `drain` termina exatamente após o último quadro de conteúdo ou devolve `TimedOut`; `Drop` para o stream — implemented | `REQ-E01-02` | `TASK-E01-02` | `tests/stream.rs` |
-| `OUTPUT-REQ-09` | `DeviceLost` vem só do backend; a biblioteca nunca migra para outro dispositivo sozinha — implemented no contrato; planned (M3) nos hosts reais | `REQ-E04-05` | `TASK-E04-05` | `tests/stream.rs` |
+| `OUTPUT-REQ-09` | `DeviceLost` vem só do backend; a biblioteca nunca migra para outro dispositivo sozinha — implemented no contrato; implemented no host WASAPI (nunca reabre, só `Lost`); provado em hardware ainda não | `REQ-E04-05` | `TASK-E04-05` | `tests/stream.rs`; `wasapi_host.rs` |
 | `OUTPUT-REQ-10` | A matriz de suporte publicada é igual à gerada pelo código — implemented | `REQ-E01-02` | `TASK-E01-02` | `crates/vynamp-output/tests/support_matrix.rs` |
 | `OUTPUT-REQ-11` | Formato DSD nativo (`DsdNative`) distinto de `Dop` em `SampleFormat` e `StreamConfig` — planned (M5) | `REQ-E12-04` | `TASK-E12-04` | — |
 | `OUTPUT-REQ-12` | PCM 768 kHz anunciado e aberto quando o dispositivo suporta — planned (M5) | `REQ-E12-04` | `TASK-E12-04` | — |
@@ -173,12 +173,30 @@ pub trait RenderSource: Send + 'static {
 | `OUTPUT-AC-13` | um dispositivo só DSD64 | DSD128 é pedido com `Downgrade` | abre DSD64 em DoP, nunca PCM | `dop.rs::dsd128_downgrades_to_dsd64_on_a_dsd64_only_device`; `negotiate.rs::dop_request_never_gets_pcm_nearest` |
 | `OUTPUT-AC-14` | um stream no `Null` | o host não sinaliza perda | `DeviceLost` nunca aparece; só o backend o produz | `stream.rs::device_lost_comes_only_from_the_backend` |
 | `OUTPUT-AC-15` | o código atual | `support_matrix_markdown()` roda | o resultado é igual a `docs/support-matrix.md` | `support_matrix.rs::committed_matrix_matches_generator` |
+| `OUTPUT-AC-16` | um DAC USB que anuncia 24 bits válidos em 96 kHz e em 192 kHz, ligado a uma máquina Windows 11, e um host WASAPI event-exclusive já presente na lista de `hosts()` do módulo | o cliente abre `ShareMode::Exclusive` com `DeviceSelector::Id` do DAC, `SampleFormat::I24Packed`, `Conversion::Forbid` e `OnUnavailable::Error`, uma vez a 96 000 Hz e outra a 192 000 Hz, e lê `stream.config()`, `config.valid_bits` e `config.path.os_mixer_bypassed` nos dois streams | 24/96 e 24/192 negociados em DAC (TASK-E04-05-AC-1) | `wasapi_exclusive.rs::dac_negotiates_24_96_and_24_192` (`#[ignore]`, hardware) |
+| `OUTPUT-AC-17` | um stream exclusivo I24Packed a 96 000 Hz tocando num DAC USB em Windows 11, com outro processo pronto para ocupar o mesmo dispositivo em exclusivo, o cabo USB ao alcance e a suspensão da máquina habilitada | as três condições são induzidas em sequência (busy do dispositivo, unplug do cabo e sleep seguido de resume), e depois de cada uma o cliente lê a fila de `Event` do `Stream`, o `StreamState` corrente e a posição apresentada, e chama `resume` depois que o dispositivo volta | busy/unplug/sleep recuperam com pausa (TASK-E04-05-AC-2) | `wasapi_exclusive.rs::busy_unplug_and_sleep_recover_with_pause` (`#[ignore]`, hardware) |
+| `OUTPUT-AC-18` | um DAC USB aberto por `DeviceSelector::Id` em `ShareMode::Exclusive` e, ao lado, o alto-falante interno que o Windows expõe como default do role `Multimedia`, sem nenhuma preferência de fallback autorizada no perfil do dispositivo | o cabo do DAC é removido com o stream em `Running` e o cliente lê o `StreamState` final e a lista de dispositivos que o host tentou abrir ou abriu | sem fallback speaker automático (TASK-E04-05-AC-3) | `wasapi_exclusive.rs::unplug_does_not_fall_back_to_the_default_speaker` (`#[ignore]`, hardware) |
+
+> `OUTPUT-AC-16` a `OUTPUT-AC-18` foram autorados em 2026-11-15 a partir de
+> `TASK-E04-05` e **aprovados pelo mantenedor no mesmo dia**, com uma extensão de
+> escopo: os critérios de DAC valem para Windows, Linux, macOS, Android e iOS, não
+> só para o WASAPI. O `Then` de cada linha é o critério aprovado no backlog,
+> copiado literal; `Given` e `When` são o enquadramento desta spec.
+>
+> **Estas três linhas são só o Windows.** As outras quatro plataformas estão em
+> `specs/backends.md` §5 (`OUTPUT-BK-AC-15` a `OUTPUT-BK-AC-18`), porque esta spec
+> fixa o contrato comum a todo host e aquela fixa o comportamento por host. A
+> matriz de DAC completa é `OUTPUT-AC-16` a `AC-18` mais aquelas quatro linhas;
+> nenhuma delas é repetida nas duas specs, para não divergirem na primeira edição.
+>
+> Os três exigem DAC USB e Windows 11 reais: nenhum roda neste ambiente, e nenhum
+> teste correspondente existe ainda.
 
 ### Critérios que esta spec **não** fixa
 
-- Os critérios de hardware de `TASK-E04-05` e `TASK-E04-06`: DAC USB, captura S/PDIF,
-  busy, unplug e sleep. Eles dependem dos hosts reais (`specs/backends.md`) e
-  continuam `planned`.
+- Os critérios de hardware de `TASK-E04-06`: captura S/PDIF, busy, unplug e sleep.
+  Dependem dos hosts reais (`specs/backends.md`) e continuam `planned`. Os de
+  `TASK-E04-05` estão em `OUTPUT-AC-16` a `OUTPUT-AC-18`, aprovados em 2026-11-15.
 - Os critérios de `TASK-E04-06` AC-2/AC-3 (EQ, ReplayGain, selo de origem) e de
   `TASK-E04-09` (camadas de perfil, import de preset de fone). Esses são do player e do
   engine. Este módulo só fornece `PathProperties`, `DeviceId` e capacidades.
@@ -253,7 +271,7 @@ cargo test --workspace
 
 | Limitação | Consequência | Quem cobre |
 |---|---|---|
-| Só os hosts `Null` e `Capture` existem | nenhum som sai num dispositivo real; `support()` devolve `None` para os hosts do OS | `specs/backends.md`, `TASK-E04-05` (M3) |
+| O host WASAPI existe (exclusivo) mas nunca rodou em hardware | `support(Wasapi, _)` é `Compiled` nos recursos que o backend tem e `None` em DoP, que `to_wasapi` recusa: o alvo compila, nada foi medido; as ACs de DAC ficam `#[ignore]` até um run real | `docs/hardware-matrix.md`, `TASK-E04-05` |
 | Todo recurso está em `LibraryVerified` | não há prova em hardware nem de integração | `docs/hardware-matrix.md`, `TASK-E04-06` |
 | `DsdNative` e PCM 768 kHz não existem | DSD só por DoP | `OUTPUT-REQ-11` e `OUTPUT-REQ-12`, `TASK-E12-04` (M5) |
 | `Stream::reconfigure(rate)` do design não existe | troca de taxa em exclusivo exige fechar e reabrir o stream | futura TASK de hosts reais |

@@ -80,16 +80,46 @@ impl Feature {
 /// The strongest verification `host` has reached for `feature`, or `None`
 /// when the host does not implement it in this release.
 ///
-/// The OS backends are not implemented yet. `Null` and `Capture` are
-/// library-verified for every feature: their tests run in every CI build.
-pub fn support(host: HostId, _feature: Feature) -> Option<VerificationLevel> {
+/// `Null` and `Capture` are library-verified for every feature: their tests
+/// run in every CI build.
+///
+/// `Wasapi` is `Compiled` for the features the backend actually has, and
+/// `None` for the ones it does not: the backend is in the crate and the
+/// Windows target compiles it in CI, and nothing was ever run. `Compiled` is
+/// the weakest level and the only honest one — no WASAPI test has run on
+/// hardware, so nothing above it is claimed. The hardware criteria
+/// (`OUTPUT-AC-16` to `OUTPUT-AC-18`, `OUTPUT-BK-AC-15` to `AC-19`) are
+/// `#[ignore]` until a DAC and a Windows 11 machine run them; when they do,
+/// this is raised to `HardwareVerified` and the evidence goes in
+/// `docs/hardware-matrix.md`.
+///
+/// `Feature::Dop` is `None` on `Wasapi`: `wasapi.rs::to_wasapi` rejects
+/// `SampleFormat::Dop` with `InvalidRequest` and there is no DoP packing path
+/// in the backend, so claiming even `Compiled` would promise a feature the
+/// code does not have. The other five are real: `open` takes both share
+/// modes, the probe covers the integer containers, `timing` is published by
+/// the driver, and the watcher emits the events.
+///
+/// The answer is the same on every host target: `docs/support-matrix.md` is
+/// one committed file, so it must not change when the doc generator runs on a
+/// different OS. The `Compiled` claim is backed by the `wasapi` job in
+/// `.github/workflows/ci.yml`, which builds this crate for
+/// `x86_64-pc-windows-msvc` on every run.
+///
+/// The other OS backends are not implemented: `None`.
+pub fn support(host: HostId, feature: Feature) -> Option<VerificationLevel> {
     match host {
         HostId::Null | HostId::Capture => Some(VerificationLevel::LibraryVerified),
-        HostId::Wasapi
-        | HostId::Alsa
-        | HostId::PipeWire
-        | HostId::Pulse
-        | HostId::CoreAudio
-        | HostId::AAudio => None,
+        HostId::Wasapi => match feature {
+            Feature::Dop => None,
+            Feature::SharedMode
+            | Feature::ExclusiveMode
+            | Feature::IntegerPcm
+            | Feature::Timing
+            | Feature::Events => Some(VerificationLevel::Compiled),
+        },
+        HostId::Alsa | HostId::PipeWire | HostId::Pulse | HostId::CoreAudio | HostId::AAudio => {
+            None
+        }
     }
 }

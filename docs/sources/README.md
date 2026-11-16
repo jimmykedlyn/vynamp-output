@@ -6,4 +6,4 @@ this documentation only; no code or system headers are copied.
 
 | Backend | File | Status |
 |---------|------|--------|
-| (none yet) | | |
+| wasapi | [wasapi.md](wasapi.md) | declared; compiles for `x86_64-pc-windows-msvc`, never run on hardware |

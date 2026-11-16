@@ -7,7 +7,7 @@
 | Tipo | lib |
 | Versão da spec | 0.2.0 |
 | Data | 2026-11-11 |
-| Estado | **rascunho autorado, não aprovado** — §3 a §10 escritos a partir do código e dos testes existentes; a aprovação é do mantenedor, por `GOVERNANCE.md` |
+| Estado | **§5 aprovada em 2026-11-15** pelo mantenedor, na abertura da `TASK-E04-05`, com escopo estendido a todas as plataformas. As demais seções seguem rascunho autorado a partir do código e dos testes existentes: §3, §4, §6, §9 e §10 não foram aprovadas e não devem ser lidas como contrato. A aprovação é do mantenedor, por `GOVERNANCE.md` |
 | Dono | mantenedor do `vynamp-output` |
 | Depende de | `vynamp-dsp` (opcional, feature `resample`) |
 | É dependido por | engine |
@@ -185,7 +185,7 @@ que valem desde já:
 | OUTPUT-BK-REQ-06 | A fachada lista hosts em ordem de preferência e diz qual escolheu e por quê. — implemented (só Null) | REQ de saída | E04-05 | `facade.rs` |
 | OUTPUT-BK-REQ-07 | A matriz de suporte é gerada do código e não pode divergir dele. — implemented | REQ de transparência | E04-05 | `support_matrix.rs` |
 | OUTPUT-BK-REQ-08 | Sem `unsafe` fora das crates `-sys` e do testkit. — implemented | REQ de segurança | E04-05 | lint do workspace (`unsafe_code = "forbid"`) |
-| OUTPUT-BK-REQ-09 | Backend WASAPI (compartilhado e exclusivo). — planned (M3) | REQ de saída bit-perfect | E04-05 | — |
+| OUTPUT-BK-REQ-09 | Backend WASAPI (compartilhado e exclusivo). — implemented (exclusivo); compila para `x86_64-pc-windows-msvc`, nunca rodou em hardware | REQ de saída bit-perfect | E04-05 | `crates/vynamp-output-wasapi-sys/tests/format.rs`; `crates/vynamp-output-core/tests/wasapi_format.rs`; job `wasapi` do CI |
 | OUTPUT-BK-REQ-10 | Backends ALSA, PipeWire, Pulse, CoreAudio e AAudio. — planned (M3) | REQ de saída por plataforma | E04-06 | — |
 | OUTPUT-BK-REQ-11 | Perfis por dispositivo. — planned (M3) | REQ de perfis | E04-09 | — |
 | OUTPUT-BK-REQ-12 | Saída Bluetooth. — planned (M3) | REQ de Bluetooth | E17-19 | — |
@@ -204,15 +204,67 @@ que valem desde já:
 | OUTPUT-BK-AC-08 | o relógio real | abrir, tocar e parar | entrega períodos sem erro | `null_host.rs::real_clock_smoke` |
 | OUTPUT-BK-AC-09 | um `VirtualClockHandle` | abrir um segundo stream com o primeiro ainda ativo | `InvalidRequest { what: "virtual clock already drives a stream" }`; depois de parar o primeiro, o novo abre e recebe os ticks | `stream.rs::a_virtual_clock_drives_one_stream_at_a_time` |
 | OUTPUT-BK-AC-10 | um `CaptureHost` cujo diretório não existe | `open` | `Error::Os { backend: Capture, .. }` | `capture.rs::unwritable_path_is_an_os_error` |
-| OUTPUT-BK-AC-11 | a fachada | `hosts()` | só `Null` | `facade.rs::hosts_lists_null_only` |
-| OUTPUT-BK-AC-12 | a fachada | `default_host()` | `Null`, com `HostSelection { chosen: Null, skipped: [] }` | `facade.rs::default_host_is_null_and_says_so` |
+| OUTPUT-BK-AC-11 | a fachada | `hosts()` | só `Null` | `facade.rs::hosts_lists_null_only_where_no_os_backend_exists` |
+| OUTPUT-BK-AC-12 | a fachada | `default_host()` | `Null`, com `HostSelection { chosen: Null, skipped: [] }` | `facade.rs::default_host_is_the_first_listed_and_says_so` |
 | OUTPUT-BK-AC-13 | `docs/support-matrix.md` commitado | gerar com `support_matrix_markdown()` | o texto é idêntico | `support_matrix.rs::committed_matrix_matches_generator` |
 | OUTPUT-BK-AC-14 | o alocador contador do testkit | alocar nesta thread / não alocar / alocar em outra thread | conta 1 / conta 0 / conta 0 aqui | `counting_alloc.rs::{counts_an_allocation_on_this_thread, no_allocation_is_counted_without_allocating, allocations_on_another_thread_are_not_counted_here}` |
+| OUTPUT-BK-AC-15 | um DAC USB ligado a um Linux x86_64 nativo com ALSA hw disponível (Camada 2) e PipeWire ativo na sessão, anunciando 24 bits válidos em 96 kHz e em 192 kHz | o cliente abre `ShareMode::Exclusive` pelo host `alsa`, uma vez a 96 000 Hz e outra a 192 000 Hz, e lê `stream.config()` e `config.path.os_mixer_bypassed`; em seguida a mesma abertura é tentada pelo host `pipewire`, e o modo efetivo devolvido é lido no `StreamConfig` | pelo ALSA o DAC negocia 24/96 e 24/192 sem mixer; pelo PipeWire o stream abre no modo que o servidor de fato conceder, e `config.mode` relata esse modo em vez de repetir o pedido (TASK-E12-01, TASK-E14-04-AC-2) | `alsa_exclusive.rs::dac_negotiates_24_96_and_24_192`, `pipewire.rs::negotiated_mode_is_reported_not_assumed` (`#[ignore]`, hardware) |
+| OUTPUT-BK-AC-16 | um DAC USB ligado a um Mac real — uma máquina Intel x86_64 e uma Apple Silicon arm64, cada uma com a slice nativa — com o host `coreaudio` presente | o cliente abre `ShareMode::Exclusive` com o formato físico do DAC pedido em `SampleFormat::I24Packed`, uma vez a 96 000 Hz e outra a 192 000 Hz, com hog mode e taxa de dispositivo solicitados quando o hardware permitir, e lê `stream.config()`, `config.valid_bits` e `config.path.os_mixer_bypassed` nas duas arquiteturas | nas duas arquiteturas o CoreAudio abre o DAC em 24/96 e 24/192 e relata se o mixer do OS ficou fora do caminho, sem presumir bypass onde o agregado ou o default do sistema interpõe processamento (TASK-E12-02-AC-1, TASK-E14-04-AC-1) | `coreaudio_exclusive.rs::dac_negotiates_24_96_and_24_192_on_both_arches` (`#[ignore]`, hardware, `sysctl.proc_translated = 0`) |
+| OUTPUT-BK-AC-17 | um DAC USB ligado por adaptador a um aparelho Android arm64 real (Android 10 ou superior, sem emulador), com o host `aaudio` roteando o stream por USB pela rota do sistema | o cliente abre o stream pedindo `ShareMode::Exclusive` com `SampleFormat::I24Packed`, uma vez a 96 000 Hz e outra a 192 000 Hz, e lê `stream.config()`, o sharing efetivo devolvido pelo AAudio e `config.valid_bits`; a rota de saída é lida no `AudioManager` do sistema | o stream toca pela rota USB nos formatos que OS, ROM e DAC concederem, e `config.mode` relata o sharing efetivo: `Exclusive` só aparece quando o aparelho realmente concedeu, nunca porque foi pedido (TASK-E13-01-AC-1, TASK-E13-10, TASK-E14-04-AC-2) | `aaudio_exclusive.rs::usb_dac_negotiates_24_96_and_24_192_or_reports_shared` (`#[ignore]`, hardware) |
+| OUTPUT-BK-AC-18 | um DAC USB ligado por adaptador a um aparelho iOS arm64 real (não simulador), com o host CoreAudio do alvo `aarch64-apple-ios` e a `AVAudioSession` configurada pela categoria de reprodução | o cliente abre o stream com `SampleFormat::I24Packed`, uma vez a 96 000 Hz e outra a 192 000 Hz, e lê `stream.config()`, a `sampleRate` que a sessão de áudio de fato concedeu e `config.path.os_mixer_bypassed` | a sessão relata a taxa que concedeu e o stream abre nela; quando a taxa concedida difere da pedida, `config.rate` mostra a concedida e nenhum resample silencioso do app é alegado como bit-perfect (TASK-E20-01-AC-3) | `coreaudio_ios.rs::usb_dac_negotiates_24_96_and_24_192_or_reports_session_rate` (`#[ignore]`, hardware) |
+| OUTPUT-BK-AC-19 | um DAC USB removido com o stream em `Running`, em cada um dos cinco alvos de `OUTPUT-AC-16` e `OUTPUT-BK-AC-15` a `OUTPUT-BK-AC-18`, com o alto-falante interno do sistema exposto como default | o cabo é removido e o cliente lê o `StreamState` final e a lista de dispositivos que o host tentou abrir ou abriu | nenhum alvo cai para o alto-falante default por conta própria; a perda chega como `DeviceLost` e a recuperação é `resume` explícito depois que o dispositivo volta (TASK-E04-05-AC-3) | `device_lost_is_not_a_fallback` (`#[ignore]`, hardware, uma variante por alvo) |
+
+> **NOTA DE CONFLITO — `OUTPUT-BK-AC-11` e `OUTPUT-BK-AC-12` não são
+> satisfeitos no Windows, e o mantenedor precisa ratificar qual texto vale.**
+> As duas linhas acima estão no texto aprovado em 2026-11-15 e foram restauradas
+> literalmente: `hosts()` devolve só `Null` e `default_host()` devolve `Null`
+> com `skipped: []`. `OUTPUT-AC-16`, aprovada depois no mesmo dia e mais
+> específica, exige o contrário no Windows: o host WASAPI já está na lista de
+> `hosts()`. As duas não podem valer juntas nesse alvo. A implementação segue a
+> AC-16 no Windows (WASAPI antes de `Null`) e a AC-11/AC-12 em todos os outros
+> alvos, e os testes afirmam exatamente isso — `facade.rs` e
+> `hosts_preference.rs` —, sem reescrever o `Then` aprovado para caber no
+> código. A decisão de qual critério prevalece, e a edição correspondente nesta
+> tabela, são do mantenedor; até lá esta nota é a única alteração aqui.
+
+> **`OUTPUT-BK-AC-15` a `OUTPUT-BK-AC-19` foram autorados em 2026-11-15 e
+> aprovados pelo mantenedor no mesmo dia**, com uma extensão de escopo explícita:
+> os critérios de DAC valem para Windows, Linux, macOS, Android **e** iOS, não só
+> para o WASAPI. As cinco linhas acima cobrem as quatro plataformas que não o
+> Windows; o critério do Windows é `OUTPUT-AC-16` em `specs/output.md` e **não** é
+> repetido aqui — duas cópias do mesmo `Then` em duas specs divergem na primeira
+> edição. A matriz inteira é `OUTPUT-AC-16` mais `OUTPUT-BK-AC-15` a `AC-18`.
+>
+> Os cinco critérios medem a mesma coisa — 24/96 e 24/192 negociados num DAC USB
+> pela rota nativa de cada OS — e todos exigem hardware real. Nenhum roda neste
+> ambiente, e nenhum teste correspondente existe: os backends `wasapi`, `alsa`,
+> `pipewire`, `coreaudio` e `aaudio` estão em `-` nas seis colunas de
+> `docs/support-matrix.md`, porque `support()` devolve `None` para os cinco.
+>
+> O que **não** está prometido aqui, e a diferença importa: `Exclusive` é pedido,
+> não garantido. Windows/WASAPI e Linux/ALSA têm caminho exclusivo conhecido;
+> Linux/PipeWire, macOS/CoreAudio e ambos os móveis relatam o modo e a taxa que o
+> sistema **concedeu** — o `Then` de cada linha exige o relato fiel do modo
+> efetivo, não a obtenção do exclusivo. É a mesma regra que
+> `reference/audio/05-platform-backends.md` fixa: "transparência bit a bit é
+> teste por conjunto, não consequência de pedir flag de exclusive".
+>
+> **Divisão de dono, para não duplicar entrega.** O host mora neste módulo, mas o
+> backend de cada OS não nasce nesta TASK: `TASK-E04-05` entrega o WASAPI
+> event-exclusive e declara explicitamente no Boundary que **não** implementa
+> ALSA, PipeWire, Pulse, CoreAudio nem AAudio. Linux nativo é `TASK-E12-01`,
+> macOS Intel/Silicon é `TASK-E12-02`, Android é `TASK-E13-01`/`TASK-E13-10` e iOS
+> é `TASK-E20-01`. As cinco linhas acima são o critério que cada uma dessas TASKs
+> mede no alvo real; a linha `AC-19` (unplug sem fallback) existe porque nenhuma
+> das TASKs de plataforma nomeava esse caso fora do Windows.
 
 ### Critérios que esta spec **não** fixa
 
-- Comportamento de cada backend do OS: só será fixado quando o backend existir,
-  com teste de integração no alvo.
+- Comportamento de cada backend do OS além dos cinco critérios acima: só será
+  fixado quando o backend existir, com teste de integração no alvo. Os critérios
+  de recuperação a busy e sleep por backend continuam sem linha própria — a
+  `OUTPUT-AC-17` de `specs/output.md` cobre o caso no Windows, e cada backend novo
+  fixa o seu quando existir.
 - Ordem de preferência entre backends de uma mesma plataforma (por exemplo,
   PipeWire antes de Pulse): decisão da TASK E04-06.
 

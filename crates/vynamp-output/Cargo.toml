@@ -12,10 +12,14 @@ description = "Bit-exact audio output with explicit modes, negotiation and real-
 workspace = true
 
 [features]
-default = []
+# The WASAPI backend is on by default; it only compiles on Windows, so this
+# is inert elsewhere.
+default = ["wasapi"]
 # Internal test backend that records the delivered bytes (spec §9.6); not
 # part of the published surface.
 test-capture = ["vynamp-output-core/capture"]
+# The WASAPI backend (Windows only).
+wasapi = ["vynamp-output-core/wasapi"]
 
 [dependencies]
 vynamp-output-core = { path = "../vynamp-output-core" }

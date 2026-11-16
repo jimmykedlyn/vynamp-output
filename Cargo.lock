@@ -22,6 +22,7 @@ name = "vynamp-output-core"
 version = "0.0.0"
 dependencies = [
  "vynamp-output-testkit",
+ "vynamp-output-wasapi-sys",
 ]
 
 [[package]]
@@ -30,3 +31,7 @@ version = "0.0.0"
 dependencies = [
  "vynamp-output-core",
 ]
+
+[[package]]
+name = "vynamp-output-wasapi-sys"
+version = "0.0.0"

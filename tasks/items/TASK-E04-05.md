@@ -10,10 +10,10 @@
 | Módulo dono | `vynamp-output` |
 | Repo | `jimmykedlyn/vynamp-output` |
 | REQ coberto | `REQ-E04-05` |
-| Critérios da spec | pendente — `specs/output.md` §5 |
+| Critérios da spec | `specs/output.md` §5 (`OUTPUT-AC-16` a `OUTPUT-AC-18`, aprovados em 2026-11-15) e `specs/backends.md` §5 (`OUTPUT-BK-AC-15` a `OUTPUT-BK-AC-19`, aprovados em 2026-11-15) |
 | Fase | M3 |
 | Prioridade | P1 |
-| Estado | planned |
+| Estado | in_progress |
 | Depende de | `TASK-E01-02`, `TASK-E04-02` |
 | Bloqueia | `TASK-E04-06`, `TASK-E04-09` |
 | Modelo executor | Opus — áudio/RT, concorrência, segurança ou release |
@@ -68,3 +68,36 @@ WASAPI event-exclusive, stable IDs, capabilities e ASIO adapter opcional.
 ## Notas de execução
 
 Preenchido durante a execução, não antes.
+
+### 2026-11-15 — implementação
+
+- **Base.** A §5 aprovada (`OUTPUT-AC-16..18`, `OUTPUT-BK-AC-15..19`) não está em
+  `origin/develop` (`4ab3ac2`); vive em `0de18fd`, branch
+  `chore/claude-specs-e04-05-output`. A branch de trabalho parte de `0de18fd`.
+- **Entregue.** `crates/vynamp-output-wasapi-sys/` (FFI própria, `unsafe` só ali),
+  `WasapiHost` em `vynamp-output-core` sob `cfg(target_os = "windows")` + feature
+  `wasapi`, `hosts()`/`default_host()` com ordem de preferência pura e testada,
+  `support(Wasapi, _) = Compiled`, job `wasapi` no CI que type-checka o alvo
+  Windows, `docs/sources/wasapi.md` e `docs/ffi-safety.md`.
+- **Não provado.** Nenhuma AC de DAC rodou: não há DAC USB nem Windows 11 neste
+  ambiente. Os três testes de `tests/wasapi_exclusive.rs` são `#[ignore]` com o
+  motivo escrito. `support` fica em `Compiled`, nunca acima.
+- **Conflito de spec, com uma edição indevida já revertida.** `OUTPUT-BK-AC-11`/
+  `AC-12` dizem `hosts()` = só `Null`; `OUTPUT-AC-16` (aprovada depois, no mesmo
+  dia) exige WASAPI em `hosts()`. As duas não valem juntas no Windows. O commit
+  `0c9b883` **reescreveu o `Then` das duas linhas** em `specs/backends.md` para
+  uma redação ciente de Windows, sem autorização do mantenedor; isso foi
+  desfeito: o texto aprovado em `0de18fd` está restaurado literalmente e uma
+  nota de conflito, marcada como tal, foi acrescentada sob a tabela pedindo que
+  o mantenedor ratifique qual critério prevalece. Os testes afirmam a AC-16 no
+  Windows e a AC-11/12 fora dele.
+- **Conflito de spec na AC-17, declarado no teste.** O `Then` aprovado diz que
+  as três condições "recuperam com pausa"; a tabela de estados de `stream.rs`
+  recusa `pause` e `resume` a partir de `Lost`, e o backend entra em `Lost` em
+  todo código de device-gone. O teste
+  `busy_unplug_and_sleep_recover_with_pause` (nome mantido porque a §5 de
+  `specs/output.md` o cita como prova da AC-17) prova a recuperação real, por
+  reopen, e declara a divergência em vez de afirmar uma `pause` que não pode
+  suceder. A decisão — mudar o `Then` ou implementar a pausa — é do mantenedor.
+- **Fora.** ASIO (sem critério aprovado), perfis de dispositivo (E04-09),
+  `IMMNotificationClient`, `IAudioEndpointVolume` (volume fica `Unknown`).

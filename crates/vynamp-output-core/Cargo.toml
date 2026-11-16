@@ -12,10 +12,23 @@ description = "Core API types, errors, events and format negotiation for vynamp-
 workspace = true
 
 [features]
+# The WASAPI backend is on by default on Windows, so a plain
+# `cargo build --target x86_64-pc-windows-msvc` produces a real host. On
+# other targets the module is compiled out entirely and the feature pulls
+# nothing, which is why Linux CI is unaffected.
+default = ["wasapi"]
 # The Capture test backend (records delivered bytes to a file). Off by
 # default; the facade exposes it as `test-capture`. The testkit enables it,
 # so it is always built and tested in the workspace.
 capture = []
+# The WASAPI backend (Windows only).
+wasapi = ["dep:vynamp-output-wasapi-sys"]
+
+# The backend lives behind a target-specific dependency: on a non-Windows
+# target the crate is not even resolved, which is why `wasapi` is inert
+# there instead of pulling FFI code into Linux CI.
+[target.'cfg(target_os = "windows")'.dependencies]
+vynamp-output-wasapi-sys = { path = "../vynamp-output-wasapi-sys", optional = true }
 
 [dev-dependencies]
 vynamp-output-testkit = { path = "../vynamp-output-testkit" }
