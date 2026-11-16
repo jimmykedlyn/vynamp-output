@@ -16,7 +16,9 @@ use std::time::{Duration, Instant};
 
 use crate::config::{EndpointVolume, PathProperties, RtPriority, StreamConfig, Transport, Tri};
 use crate::dop::{self, check_dop_path, dop_pcm_rate};
-use crate::driver::{Driver, NativeBuf, PeriodClock, PeriodSink, Pipeline, run_device_thread};
+use crate::driver::{
+    Driver, NativeBuf, PeriodClock, PeriodSink, Pipeline, discard_driver, run_device_thread,
+};
 use crate::error::Error;
 use crate::event::Event;
 use crate::format::{HostId, SampleFormat};
@@ -67,7 +69,8 @@ struct Binding {
     flags: Arc<RtFlags>,
     /// Ticks granted by `advance`.
     granted: AtomicU64,
-    device: OnceLock<Thread>,
+    /// The live device thread. Replaced by recovery, so not a `OnceLock`.
+    device: Mutex<Option<Thread>>,
     watcher: OnceLock<Thread>,
 }
 
@@ -88,16 +91,57 @@ impl VirtualClockHandle {
     /// thread has processed them and the watcher has turned their flags into
     /// events. Without an open stream it returns at once.
     ///
-    /// Ticks while the stream is not running (`Opened`, `Paused`, `Lost`)
-    /// pass without delivering frames, like a stopped device clock.
+    /// Ticks while the stream is not running (`Opened`, `Paused`) pass
+    /// without delivering frames, like a stopped device clock. A `Lost`
+    /// stream has no device thread to take them, so `advance` grants nothing
+    /// and returns once the watcher has reported the loss.
     pub fn advance(&self, periods: u64) {
         let Some(b) = self.current() else { return };
+        // A lost device has no thread to take ticks, and a tick granted while
+        // lost would be delivered after recovery — audio the caller never
+        // asked to play. So a lost stream grants nothing: `advance` only
+        // waits for the watcher to report the loss.
+        if b.flags.lost.load(Ordering::Acquire) {
+            if let Some(w) = b.watcher.get() {
+                w.unpark();
+            }
+            while b.flags.watched_losses.load(Ordering::Acquire)
+                < b.flags.lost_seq.load(Ordering::Acquire)
+            {
+                // A stopped stream's watcher has left; nothing will report.
+                if b.flags.watcher_exit.load(Ordering::Acquire) {
+                    return;
+                }
+                thread::yield_now();
+            }
+            return;
+        }
         let target = b.granted.fetch_add(periods, Ordering::AcqRel) + periods;
-        if let Some(t) = b.device.get() {
+        if let Some(t) = b
+            .device
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
             t.unpark();
         }
         loop {
             let f = &b.flags;
+            // The loss can also arrive mid-advance. The ticks already granted
+            // stay granted and are taken by the thread respawned on recovery;
+            // return once the loss is reported.
+            if f.lost.load(Ordering::Acquire) {
+                if let Some(w) = b.watcher.get() {
+                    w.unpark();
+                }
+                if f.watched_losses.load(Ordering::Acquire) >= f.lost_seq.load(Ordering::Acquire)
+                    || f.watcher_exit.load(Ordering::Acquire)
+                {
+                    return;
+                }
+                thread::yield_now();
+                continue;
+            }
             if f.device_exited.load(Ordering::Acquire) {
                 return;
             }
@@ -117,6 +161,15 @@ impl VirtualClockHandle {
             b.flags.notify_lost();
             if let Some(w) = b.watcher.get() {
                 w.unpark();
+            }
+            // The device thread leaves on loss; wake it so it sees the flag.
+            if let Some(d) = b
+                .device
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_ref()
+            {
+                d.unpark();
             }
         }
     }
@@ -143,8 +196,11 @@ impl VirtualClockHandle {
             .binding
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        // Only a stream that was stopped frees the handle. A lost stream has
+        // exited its thread too, but it is still recoverable and still owns
+        // the clock (`Lost --pause--> Paused`, ADR-002).
         if let Some(b) = slot.as_ref()
-            && !b.flags.device_exited.load(Ordering::Acquire)
+            && b.flags.state_code() != crate::rtflags::ST_STOPPED
         {
             return Err(Error::InvalidRequest {
                 what: "virtual clock already drives a stream",
@@ -153,7 +209,7 @@ impl VirtualClockHandle {
         let b = Arc::new(Binding {
             flags,
             granted: AtomicU64::new(0),
-            device: OnceLock::new(),
+            device: Mutex::new(None),
             watcher: OnceLock::new(),
         });
         *slot = Some(b.clone());
@@ -178,8 +234,11 @@ fn frames_to_nanos(frames: u64, rate: u32) -> u64 {
 }
 
 /// Wall-clock pacing. Parks until each deadline (`stop` unparks it).
-struct RealClock {
+pub(crate) struct RealClock {
     start: Option<Instant>,
+    /// Periods already paced. Kept in the clock, which travels back through
+    /// the `JoinHandle` on a loss, so a respawned thread keeps the same
+    /// deadline arithmetic instead of restarting at zero.
     k: u64,
     period_frames: u64,
     rate: u32,
@@ -192,6 +251,11 @@ impl PeriodClock for RealClock {
             start + Duration::from_nanos(frames_to_nanos(self.k * self.period_frames, self.rate));
         loop {
             if flags.exit.load(Ordering::Acquire) {
+                return None;
+            }
+            // A lost device ends the loop: the driver travels back through
+            // the `JoinHandle` and `recover` respawns the thread with it.
+            if flags.lost.load(Ordering::Acquire) {
                 return None;
             }
             let now = Instant::now();
@@ -207,9 +271,12 @@ impl PeriodClock for RealClock {
 
 /// Test-driven pacing: one tick per granted period, virtual time
 /// `tick * period / rate`.
-struct VirtualClock {
+pub(crate) struct VirtualClock {
     binding: Arc<Binding>,
     inner: Arc<VirtualInner>,
+    /// Periods already taken. Kept in the clock, which travels back through
+    /// the `JoinHandle` on a loss, so a respawned thread continues from where
+    /// the old one left instead of replaying granted ticks.
     taken: u64,
     period_frames: u64,
     rate: u32,
@@ -219,6 +286,11 @@ impl PeriodClock for VirtualClock {
     fn wait(&mut self, flags: &RtFlags) -> Option<MonotonicNanos> {
         loop {
             if flags.exit.load(Ordering::Acquire) {
+                return None;
+            }
+            // A lost device ends the loop: the driver travels back through
+            // the `JoinHandle` and `recover` respawns the thread with it.
+            if flags.lost.load(Ordering::Acquire) {
                 return None;
             }
             if self.binding.granted.load(Ordering::Acquire) > self.taken {
@@ -243,15 +315,70 @@ impl PeriodClock for VirtualClock {
     }
 }
 
-/// Control-side handle of a device thread (Null and Capture).
-pub(crate) struct ThreadBackend {
-    flags: Arc<RtFlags>,
-    device: Option<JoinHandle<()>>,
-    /// Runs after the device thread is joined (Capture: flush + manifest).
-    finish: Option<Box<dyn FnOnce() -> Result<(), Error> + Send>>,
+/// The two pacings of the Null/Capture device, as one type so a backend does
+/// not have to be generic over which clock it was opened with.
+pub(crate) enum DeviceClock {
+    Real(RealClock),
+    Virtual(VirtualClock),
 }
 
-impl BackendStream for ThreadBackend {
+impl PeriodClock for DeviceClock {
+    fn wait(&mut self, flags: &RtFlags) -> Option<MonotonicNanos> {
+        match self {
+            DeviceClock::Real(c) => c.wait(flags),
+            DeviceClock::Virtual(c) => c.wait(flags),
+        }
+    }
+
+    fn tick_done(&mut self) {
+        match self {
+            DeviceClock::Real(c) => c.tick_done(),
+            DeviceClock::Virtual(c) => c.tick_done(),
+        }
+    }
+
+    fn after_tick(&mut self) {
+        match self {
+            DeviceClock::Real(c) => c.after_tick(),
+            DeviceClock::Virtual(c) => c.after_tick(),
+        }
+    }
+}
+
+/// Starts a device thread for a driver and returns its handle.
+type Spawn<C, K> =
+    Box<dyn Fn(Driver<C, K>) -> std::io::Result<JoinHandle<Option<Driver<C, K>>>> + Send>;
+
+/// Control-side handle of a device thread (Null and Capture).
+///
+/// The thread returns its whole [`Driver`] when it leaves because the device
+/// was lost, and `recover` starts a new thread with that same driver: the
+/// `RenderSource`, the pre-allocated period buffers and the delivery position
+/// survive the loss without a lock or an allocation on the device thread
+/// (ADR-002, the respawn mechanism).
+pub(crate) struct ThreadBackend<C: PeriodClock, K: PeriodSink> {
+    host: HostId,
+    flags: Arc<RtFlags>,
+    device: Option<JoinHandle<Option<Driver<C, K>>>>,
+    /// Starts a device thread for a driver. Captures the thread name and, for
+    /// the virtual clock, the binding whose `device` handle it refreshes.
+    spawn: Spawn<C, K>,
+    /// Runs after the device thread is joined (Capture: flush + manifest).
+    finish: Option<Box<dyn FnOnce() -> Result<(), Error> + Send>>,
+    /// The virtual device this backend opened; the only one it ever opens.
+    open_attempts: Vec<DeviceId>,
+}
+
+impl<C: PeriodClock, K: PeriodSink> ThreadBackend<C, K> {
+    /// Joins the device thread and returns the driver it handed back, if any.
+    fn join_device(&mut self) -> Option<Driver<C, K>> {
+        let h = self.device.take()?;
+        h.thread().unpark();
+        h.join().ok().flatten()
+    }
+}
+
+impl<C: PeriodClock, K: PeriodSink> BackendStream for ThreadBackend<C, K> {
     // The device thread follows `flags.state`; nothing to do per transition.
     fn start(&mut self) -> Result<(), Error> {
         Ok(())
@@ -261,16 +388,31 @@ impl BackendStream for ThreadBackend {
         Ok(())
     }
 
+    /// The virtual device never actually goes away, so recovery is: join the
+    /// thread that left on the loss, clear the loss notification and start a
+    /// new thread with the driver it handed back.
+    fn recover(&mut self) -> Result<(), Error> {
+        let Some(driver) = self.join_device() else {
+            return Err(Error::DeviceLost);
+        };
+        self.flags.clear_lost();
+        self.flags.device_exited.store(false, Ordering::Release);
+        let h = (self.spawn)(driver).map_err(spawn_error(self.host))?;
+        self.device = Some(h);
+        Ok(())
+    }
+
+    fn open_attempts(&self) -> &[DeviceId] {
+        &self.open_attempts
+    }
+
     /// Joins the device thread. A virtual device holds no queued audio, so
     /// there is nothing else to discard.
     fn stop(&mut self) -> Result<(), Error> {
         self.flags.exit.store(true, Ordering::Release);
-        if let Some(h) = self.device.take() {
-            h.thread().unpark();
-            // A panic outside `render` (e.g. in the source's Drop) only ends
-            // the device thread; the stream is stopped either way.
-            let _ = h.join();
-        }
+        // `stop` leaves the driver's `lost`-free path, so the thread hands
+        // nothing back; discard defensively in case a loss raced the stop.
+        discard_driver(self.join_device());
         self.finish.take().map_or(Ok(()), |f| f())
     }
 }
@@ -529,51 +671,44 @@ pub(crate) fn launch<K: PeriodSink>(
     let period_frames = u64::from(config.period_frames);
     let rate = config.rate;
     let name = "vynamp-output-device";
-    let builder = || thread::Builder::new().name(name.into());
-    let spawned = match binding {
-        Some((handle, b)) => {
-            let clock = VirtualClock {
-                binding: b.clone(),
-                inner: handle.inner.clone(),
-                taken: 0,
-                period_frames,
-                rate,
-            };
-            let d = Driver::new(
-                clock,
-                l.sink,
-                source,
-                flags.clone(),
-                config.clone(),
-                native,
-                pipeline,
-                0,
-            );
-            builder().spawn(move || run_device_thread(d)).inspect(|h| {
-                let _ = b.device.set(h.thread().clone());
-            })
-        }
-        None => {
-            let clock = RealClock {
-                start: None,
-                k: 0,
-                period_frames,
-                rate,
-            };
-            let d = Driver::new(
-                clock,
-                l.sink,
-                source,
-                flags.clone(),
-                config.clone(),
-                native,
-                pipeline,
-                0,
-            );
-            builder().spawn(move || run_device_thread(d))
-        }
+    // The clock travels back through the `JoinHandle` on a loss, so a thread
+    // respawned by recovery continues the same pacing.
+    let clock = match &binding {
+        Some((handle, b)) => DeviceClock::Virtual(VirtualClock {
+            binding: b.clone(),
+            inner: handle.inner.clone(),
+            taken: 0,
+            period_frames,
+            rate,
+        }),
+        None => DeviceClock::Real(RealClock {
+            start: None,
+            k: 0,
+            period_frames,
+            rate,
+        }),
     };
-    let device = match spawned {
+    let published = binding.as_ref().map(|(_, b)| b.clone());
+    let spawn = Box::new(move |d: Driver<DeviceClock, K>| {
+        let h = thread::Builder::new()
+            .name(name.into())
+            .spawn(move || run_device_thread(d))?;
+        if let Some(b) = &published {
+            *b.device.lock().unwrap_or_else(PoisonError::into_inner) = Some(h.thread().clone());
+        }
+        Ok(h)
+    });
+    let driver = Driver::new(
+        clock,
+        l.sink,
+        source,
+        flags.clone(),
+        config.clone(),
+        native,
+        pipeline,
+        0,
+    );
+    let device = match spawn(driver) {
         Ok(h) => h,
         Err(e) => {
             abandon(&flags);
@@ -584,21 +719,16 @@ pub(crate) fn launch<K: PeriodSink>(
         }
     };
     let backend = ThreadBackend {
+        host,
         flags: flags.clone(),
         device: Some(device),
+        spawn,
         finish: l.finish,
+        // The virtual device is the only one this host can open, and it was
+        // opened: the list is the backend's own record, not the request's.
+        open_attempts: vec![config.device.clone()],
     };
-    // The virtual device is the only one this host can open, and it was
-    // opened: the list is the backend's own record, not the request's.
-    let open_attempts = vec![config.device.clone()];
-    Ok(Stream::new(
-        config,
-        flags,
-        Box::new(backend),
-        watcher,
-        rx,
-        open_attempts,
-    ))
+    Ok(Stream::new(config, flags, Box::new(backend), watcher, rx))
 }
 
 /// A host with one virtual output device (`"null"`) that discards audio.

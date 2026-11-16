@@ -116,6 +116,41 @@ pub(crate) struct Driver<C, K> {
 }
 
 impl<C: PeriodClock, K: PeriodSink> Driver<C, K> {
+    /// The same driver with a new clock and sink, and the same source, buffers
+    /// and delivery position.
+    ///
+    /// Recovery uses this after a loss: the OS stream object is new, so its
+    /// clock and sink are new too, but the `RenderSource`, the pre-allocated
+    /// period buffers and `device_frame` must not be rebuilt (ADR-002).
+    /// `sink` receives the old sink, so a new sink can take over the buffers
+    /// it owned. Called on the control thread, between the old device thread
+    /// returning the driver and the new one starting; never concurrently with
+    /// a tick.
+    ///
+    /// Only the WASAPI backend needs it today (the Null/Capture device never
+    /// really goes away, so their recovery reuses the same clock and sink);
+    /// it is compiled on every target so the contract is testable there.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn rebind<C2: PeriodClock, K2: PeriodSink>(
+        self,
+        clock: C2,
+        sink: impl FnOnce(K) -> K2,
+    ) -> Driver<C2, K2> {
+        Driver {
+            clock,
+            sink: sink(self.sink),
+            source: self.source,
+            flags: self.flags,
+            config: self.config,
+            native: self.native,
+            pipeline: self.pipeline,
+            latency_frames: self.latency_frames,
+            device_frame: self.device_frame,
+            source_state: self.source_state,
+            dop_phase: self.dop_phase,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         clock: C,
@@ -244,8 +279,29 @@ fn work_buffer<'a>(pipeline: &'a mut Pipeline, native: &'a mut NativeBuf) -> Dev
     }
 }
 
+/// Drops a driver on the control thread, ignoring a panic in its `Drop`.
+///
+/// The driver owns the `RenderSource`, so on a normal `stop` it is dropped
+/// here rather than on the device thread; a source whose `Drop` panics must
+/// not turn `stop` into a panic (the device thread's panic was previously
+/// swallowed by `JoinHandle::join`). Control thread only.
+pub(crate) fn discard_driver<C, K>(driver: Option<Driver<C, K>>) {
+    let Some(driver) = driver else { return };
+    let _ = catch_unwind(AssertUnwindSafe(move || drop(driver)));
+}
+
 /// The device-thread body: runs ticks until the clock says to exit.
-pub(crate) fn run_device_thread<C: PeriodClock, K: PeriodSink>(mut driver: Driver<C, K>) {
+///
+/// Returns the whole driver — source, pre-allocated buffers, pipeline,
+/// counters and the clock's own state — when it left because the device was
+/// lost, and `None` when it left because the stream was stopped. Recovery
+/// ([`crate::stream::BackendStream::recover`]) hands the driver back to a new
+/// thread, so the `RenderSource` survives the loss without a lock or an
+/// allocation on this thread (ADR-002, the "respawn" mechanism: ownership
+/// travels through the `JoinHandle`, never through shared memory).
+pub(crate) fn run_device_thread<C: PeriodClock, K: PeriodSink>(
+    mut driver: Driver<C, K>,
+) -> Option<Driver<C, K>> {
     while let Some(at) = driver.clock.wait(&driver.flags) {
         driver.tick(at);
         driver.clock.tick_done();
@@ -254,6 +310,7 @@ pub(crate) fn run_device_thread<C: PeriodClock, K: PeriodSink>(mut driver: Drive
     }
     driver.flags.device_exited.store(true, Ordering::Release);
     driver.clock.after_tick();
+    driver.flags.lost.load(Ordering::Acquire).then_some(driver)
 }
 
 #[cfg(test)]

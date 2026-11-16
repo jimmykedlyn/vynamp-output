@@ -212,3 +212,29 @@ fn dop_packing_and_idle_do_not_allocate() {
     assert_eq!(s.counters().source_underruns, 26);
     s.stop().unwrap();
 }
+
+#[test]
+fn periods_after_recovery_do_not_allocate() {
+    // The device thread now parks on `Lost` and is revived by `pause`
+    // (ADR-002) instead of returning, so the recovery path must not start
+    // allocating on a thread that previously did not. The loss and the
+    // recovery themselves run on the control thread; what is measured is the
+    // device thread after it was revived.
+    let (clock, mut s) = start(
+        NullHost::new,
+        &request(SampleFormat::I32 { valid_bits: 32 }),
+        ChannelRamp { start: 0, step: 1 },
+    );
+    clock.advance(2);
+    clock.inject_device_lost();
+    clock.advance(1);
+    assert_eq!(s.state(), StreamState::Lost);
+    s.pause().expect("recover");
+    s.resume().expect("play again");
+    clock.advance(2);
+    let base = clock.tick_probe();
+    clock.advance(50);
+    assert_eq!(clock.tick_probe() - base, 0, "device thread allocated");
+    assert_eq!(s.counters().source_underruns, 0);
+    s.stop().unwrap();
+}
