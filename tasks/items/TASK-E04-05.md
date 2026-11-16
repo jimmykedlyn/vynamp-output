@@ -82,22 +82,24 @@ Preenchido durante a execução, não antes.
 - **Não provado.** Nenhuma AC de DAC rodou: não há DAC USB nem Windows 11 neste
   ambiente. Os três testes de `tests/wasapi_exclusive.rs` são `#[ignore]` com o
   motivo escrito. `support` fica em `Compiled`, nunca acima.
-- **Conflito de spec, com uma edição indevida já revertida.** `OUTPUT-BK-AC-11`/
-  `AC-12` dizem `hosts()` = só `Null`; `OUTPUT-AC-16` (aprovada depois, no mesmo
-  dia) exige WASAPI em `hosts()`. As duas não valem juntas no Windows. O commit
-  `0c9b883` **reescreveu o `Then` das duas linhas** em `specs/backends.md` para
-  uma redação ciente de Windows, sem autorização do mantenedor; isso foi
-  desfeito: o texto aprovado em `0de18fd` está restaurado literalmente e uma
-  nota de conflito, marcada como tal, foi acrescentada sob a tabela pedindo que
-  o mantenedor ratifique qual critério prevalece. Os testes afirmam a AC-16 no
+- **Conflito de spec, resolvido por ratificação em 2026-11-16.** `OUTPUT-BK-AC-11`/
+  `AC-12` diziam `hosts()` = só `Null`; `OUTPUT-AC-16` (aprovada depois, no mesmo
+  dia) exige WASAPI em `hosts()`. As duas não valiam juntas no Windows. O commit
+  `0c9b883` reescreveu o `Then` das duas linhas sem autorização e a edição foi
+  revertida na hora, com uma nota de conflito pedindo a decisão do mantenedor.
+  **O mantenedor ratificou a `OUTPUT-AC-16` no Windows**: o `Then` ciente de
+  Windows voltou a `specs/backends.md` §5 e a nota de conflito saiu. Nenhum
+  código mudou — `facade.rs` e `hosts_preference.rs` já afirmavam a AC-16 no
   Windows e a AC-11/12 fora dele.
-- **Conflito de spec na AC-17, declarado no teste.** O `Then` aprovado diz que
-  as três condições "recuperam com pausa"; a tabela de estados de `stream.rs`
-  recusa `pause` e `resume` a partir de `Lost`, e o backend entra em `Lost` em
-  todo código de device-gone. O teste
-  `busy_unplug_and_sleep_recover_with_pause` (nome mantido porque a §5 de
-  `specs/output.md` o cita como prova da AC-17) prova a recuperação real, por
-  reopen, e declara a divergência em vez de afirmar uma `pause` que não pode
-  suceder. A decisão — mudar o `Then` ou implementar a pausa — é do mantenedor.
+- **Conflito de spec na AC-17, resolvido por decisão de desenho em 2026-11-16.**
+  O `Then` aprovado diz que as três condições "recuperam com pausa"; a tabela de
+  estados recusava `pause` e `resume` a partir de `Lost`. O mantenedor decidiu
+  que `Lost --pause--> Paused` é transição válida: `pause` a partir de `Lost`
+  reabre **o mesmo** dispositivo (`OUTPUT-REQ-09`), descarta os buffers e
+  devolve `Paused`; um `resume` explícito depois toca. `resume` a partir de
+  `Lost` continua inválido. A decisão está em `docs/adr/ADR-002-lost-recovery.md`
+  e o teste `busy_unplug_and_sleep_recover_with_pause` (nome mantido porque a §5
+  de `specs/output.md` o cita como prova da AC-17) passou a chamar `pause` e
+  depois `resume`, sem reopen.
 - **Fora.** ASIO (sem critério aprovado), perfis de dispositivo (E04-09),
   `IMMNotificationClient`, `IAudioEndpointVolume` (volume fica `Unknown`).
