@@ -61,12 +61,17 @@ recovery that keeps them is a recovery that survives device loss.
      the source state, so returning it is what makes the source survive.
    - The `JoinHandle` carries that value. `BackendStream::recover` (the new
      trait method, called by `Stream::pause` from `Lost`) joins the old
-     thread, reopens the OS stream, and starts a new device thread with
-     `Driver::rebind`, which swaps the clock and the sink (the new OS stream)
-     and keeps everything else. The clock's own pacing position (`k` for the
-     real clock, `taken` for the virtual one) lives in the clock, which is
-     part of the driver, so the respawned thread continues the same pacing
-     instead of replaying granted ticks.
+     thread, splits the driver with `Driver::release_device` — dropping the
+     clock and the sink, which hold every handle to the old OS stream — and
+     only then reopens the same endpoint, attaching the new clock and sink to
+     the `DriverCore` with `DriverCore::attach`. The order matters: an
+     exclusive client the OS still counts as a client of the endpoint makes
+     `Initialize` fail with `AUDCLNT_E_DEVICE_IN_USE`. If the open fails the
+     `DriverCore` and the sink's period bytes stay in the backend, so the next
+     `pause` retries with the same source. The clock's own pacing position
+     (`k` for the real clock, `taken` for the virtual one) lives in the clock,
+     which is part of the driver, so the respawned thread continues the same
+     pacing instead of replaying granted ticks.
    - Nothing on the device thread allocates, locks, does I/O or logs: the
      handoff is a `JoinHandle` return value, and the only new work on that
      thread is the `Option` it builds. `tests/zero_alloc_device.rs` measures
