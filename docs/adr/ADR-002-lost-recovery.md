@@ -28,6 +28,10 @@ recovery that keeps them is a recovery that survives device loss.
 1. **`pause` gains a recovery transition: `Lost -> Paused`.** `resume`
    continues to mean only `Paused -> Running`; it stays invalid from `Lost`.
    The state table in `stream.rs` and `specs/output.md` §3.3 gains the row.
+   The state is marked `Paused` **before** the reopen finishes, so a
+   concurrent `state()` from another thread can observe `Paused` while the
+   device is still coming back. That is deliberate: the respawned device
+   thread needs the state out of `Lost` to render.
 
 2. **`pause` from `Lost` reopens the same device and only that device.** The
    backend recovers with the `OpenRequest` already recorded at open time —
@@ -38,13 +42,14 @@ recovery that keeps them is a recovery that survives device loss.
    backend's error, the stream stays `Lost`, and the application may try
    `pause` again later or `stop`.
 
-3. **Recovery discards device buffers and never replays old audio.** The
-   reopened stream starts from an empty OS buffer, and the driver's
-   pre-allocated period buffer is refilled from the source before it is
-   written, so no stale period reaches the fresh device — old audio never
-   replays after recovery, exactly as after `stop`. `device_frame_index`
-   keeps counting forward (content and silence), so a consumer's position
-   never goes backwards.
+3. **Recovery does not replay old audio.** The argument is structural, not a
+   measured result: the stream object is new, and the driver's pre-allocated
+   period buffer is refilled from the source before it is written, so no
+   stale period reaches the fresh device. This is not proven by a test — the
+   `Null` backend's sink is `Discard`, so it has no buffer to discard, and
+   the WASAPI path has no test for it. `device_frame_index` keeps counting
+   forward (content and silence), so a consumer's position never goes
+   backwards.
 
 4. **`Lost -> Stopped` is unchanged**, and a stream that recovers goes
    `Lost -> Paused -> Running` only by an explicit `resume`, mirroring how

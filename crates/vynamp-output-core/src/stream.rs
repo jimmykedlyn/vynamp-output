@@ -20,8 +20,10 @@
 //!
 //! `Lost --pause--> Paused` is recovery ([ADR-002][adr]): it reopens **the
 //! same** device with the request recorded at open (never another, per
-//! `OUTPUT-REQ-09`), discards the device buffers and returns `Paused`; a
-//! later, explicit `resume` plays. Reopening can fail — the device may not be
+//! `OUTPUT-REQ-09`), and returns `Paused`; a
+//! later, explicit `resume` plays. Old audio does not replay because the
+//! stream object is new and the period buffer is refilled from the source
+//! before it reaches the device. Reopening can fail — the device may not be
 //! back yet — in which case `pause` returns the backend's error and the
 //! stream stays `Lost`. `resume` from `Lost` stays invalid: it only ever
 //! means `Paused -> Running`.
@@ -94,11 +96,12 @@ pub enum DrainOutcome {
 pub(crate) trait BackendStream: Send {
     fn start(&mut self) -> Result<(), Error>;
     fn pause(&mut self) -> Result<(), Error>;
-    /// Reopens **the same** device after the stream entered `Lost`, discards
-    /// its buffers and clears the shared `lost` notification so a second loss
-    /// is reported again. Called on the control thread by `pause` from
-    /// `Lost`; if the device has not come back it returns an error and the
-    /// stream stays `Lost`. Never opens another device (`OUTPUT-REQ-09`).
+    /// Reopens **the same** device after the stream entered `Lost` and clears
+    /// the shared `lost` notification. A second loss is still reported
+    /// because the watcher counts `lost_seq`, not the flag. Called on the
+    /// control thread by `pause` from `Lost`; if the device has not come back
+    /// it returns an error and the stream stays `Lost`. Never opens another
+    /// device (`OUTPUT-REQ-09`).
     fn recover(&mut self) -> Result<(), Error>;
     /// Every device this backend opened for the stream, in order. The backend
     /// owns the record because recovery can add to it; `Stream` only reads it.
@@ -180,9 +183,14 @@ impl Stream {
     /// `Running -> Paused`. The device stops consuming frames.
     ///
     /// Also `Lost -> Paused`, which is recovery ([ADR-002][adr]): the backend
-    /// reopens **the same** device, discards its buffers and the stream lands
-    /// paused, ready for an explicit [`resume`](Self::resume). If the device
-    /// is still gone the call fails and the stream stays `Lost`.
+    /// reopens **the same** device and the stream lands paused, ready for an
+    /// explicit [`resume`](Self::resume). If the device is still gone the call
+    /// fails and the stream stays `Lost`.
+    ///
+    /// The state becomes `Paused` **before** the reopen finishes, so a
+    /// concurrent [`state`](Self::state) from another thread may observe
+    /// `Paused` while the device is still coming back. That is deliberate: the
+    /// respawned device thread needs the state out of `Lost` to render.
     ///
     /// [adr]: https://github.com/jimmykedlyn/vynamp-output/blob/develop/docs/adr/ADR-002-lost-recovery.md
     pub fn pause(&mut self) -> Result<(), Error> {
