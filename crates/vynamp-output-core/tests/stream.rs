@@ -330,8 +330,9 @@ fn lost_recovers_with_pause_then_resume_and_keeps_the_source() {
 
 #[test]
 fn a_second_loss_after_recovery_is_reported_again() {
-    // `RtFlags.lost` must be cleared by recovery, or the watcher would treat
-    // the second loss as already reported.
+    // The watcher counts losses by `flags.lost_seq`, not by the `lost` flag:
+    // `Seen::losses` compares the sequence number, so the second loss is new
+    // even though recovery may have cleared `lost`.
     let (clock, mut s) = open(ChannelRamp { start: 0, step: 1 });
     s.start().unwrap();
     clock.advance(1);
