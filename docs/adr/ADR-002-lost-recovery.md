@@ -38,12 +38,13 @@ recovery that keeps them is a recovery that survives device loss.
    backend's error, the stream stays `Lost`, and the application may try
    `pause` again later or `stop`.
 
-3. **Recovery discards device buffers and resets the delivery path.** The
-   reopened stream starts from an empty OS buffer; the driver restarts its
-   frame counter only in the sense that no stale period is written into the
-   fresh device — old audio never replays after recovery, exactly as after
-   `stop`. `device_frame_index` keeps counting forward (content and silence),
-   so a consumer's position never goes backwards.
+3. **Recovery discards device buffers and never replays old audio.** The
+   reopened stream starts from an empty OS buffer, and the driver's
+   pre-allocated period buffer is refilled from the source before it is
+   written, so no stale period reaches the fresh device — old audio never
+   replays after recovery, exactly as after `stop`. `device_frame_index`
+   keeps counting forward (content and silence), so a consumer's position
+   never goes backwards.
 
 4. **`Lost -> Stopped` is unchanged**, and a stream that recovers goes
    `Lost -> Paused -> Running` only by an explicit `resume`, mirroring how
@@ -63,8 +64,8 @@ recovery that keeps them is a recovery that survives device loss.
      thread, reopens the OS stream, and starts a new device thread with
      `Driver::rebind`, which swaps the clock and the sink (the new OS stream)
      and keeps everything else. The clock's own pacing position (`k` for the
-     real clock, `taken` for the virtual one) is an `Arc<AtomicU64>` shared
-     with the backend, so the respawned thread continues the same pacing
+     real clock, `taken` for the virtual one) lives in the clock, which is
+     part of the driver, so the respawned thread continues the same pacing
      instead of replaying granted ticks.
    - Nothing on the device thread allocates, locks, does I/O or logs: the
      handoff is a `JoinHandle` return value, and the only new work on that
