@@ -389,16 +389,20 @@ impl<C: PeriodClock, K: PeriodSink> BackendStream for ThreadBackend<C, K> {
     }
 
     /// The virtual device never actually goes away, so recovery is: join the
-    /// thread that left on the loss, clear the loss notification and start a
-    /// new thread with the driver it handed back.
+    /// thread that left on the loss, start a new thread with the driver it
+    /// handed back, and only then clear the loss notification.
+    ///
+    /// The flags come last on purpose: a failed spawn leaves the stream
+    /// `Lost` with `lost` still set, so the caller may retry `pause`. Clearing
+    /// them first would leave `lost = false` on a stream that is still `Lost`.
     fn recover(&mut self) -> Result<(), Error> {
         let Some(driver) = self.join_device() else {
             return Err(Error::DeviceLost);
         };
-        self.flags.clear_lost();
-        self.flags.device_exited.store(false, Ordering::Release);
         let h = (self.spawn)(driver).map_err(spawn_error(self.host))?;
         self.device = Some(h);
+        self.flags.clear_lost();
+        self.flags.device_exited.store(false, Ordering::Release);
         Ok(())
     }
 
@@ -805,5 +809,97 @@ impl Host for NullHost {
             finish: None,
         };
         launch(req, config, downgraded, source, launch_args)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::PathProperties;
+    use crate::driver::Discard;
+    use crate::format::ChannelLayout;
+    use crate::render::{DeviceBuffer, RenderContext, Rendered};
+    use crate::request::DeviceId;
+    use crate::rtflags::{ST_LOST, ST_RUNNING};
+
+    struct Silent;
+    impl RenderSource for Silent {
+        fn render(&mut self, _out: DeviceBuffer<'_>, _ctx: &RenderContext<'_>) -> Rendered {
+            Rendered {
+                frames: 0,
+                end_of_stream: false,
+            }
+        }
+    }
+
+    struct NoClock;
+    impl PeriodClock for NoClock {
+        fn wait(&mut self, _flags: &RtFlags) -> Option<MonotonicNanos> {
+            None
+        }
+    }
+
+    fn config() -> StreamConfig {
+        StreamConfig {
+            host: HostId::Null,
+            device: DeviceId("null".into()),
+            mode: ShareMode::Shared,
+            format: SampleFormat::I32 { valid_bits: 32 },
+            valid_bits: 32,
+            rate: 48_000,
+            channels: 2,
+            layout: ChannelLayout::unknown(2),
+            period_frames: 4,
+            buffer_frames: 8,
+            path: PathProperties::unknown(),
+        }
+    }
+
+    fn driver(flags: &Arc<RtFlags>) -> Driver<NoClock, Discard> {
+        Driver::new(
+            NoClock,
+            Discard,
+            Box::new(Silent),
+            flags.clone(),
+            config(),
+            NativeBuf::I32(vec![0; 8].into_boxed_slice()),
+            Pipeline::Direct,
+            0,
+        )
+    }
+
+    /// A failed respawn must leave the loss notification set: the stream is
+    /// still `Lost`, and clearing `lost` first would make the watcher treat
+    /// the next loss as already reported.
+    #[test]
+    fn a_failed_respawn_keeps_the_loss_set() {
+        let flags = Arc::new(RtFlags::new());
+        flags.state.store(ST_RUNNING, Ordering::Release);
+        flags.notify_lost();
+        assert!(flags.lost.load(Ordering::Acquire));
+
+        let d = driver(&flags);
+        let device = thread::Builder::new()
+            .spawn(move || Some(d))
+            .expect("spawn the thread that hands the driver back");
+        let backend = ThreadBackend {
+            host: HostId::Null,
+            flags: flags.clone(),
+            device: Some(device),
+            spawn: Box::new(|_d: Driver<NoClock, Discard>| {
+                Err(std::io::Error::from_raw_os_error(11))
+            }),
+            finish: None,
+            open_attempts: vec![config().device],
+        };
+        let mut backend = backend;
+
+        assert!(backend.recover().is_err(), "the spawn failed");
+        assert!(
+            flags.lost.load(Ordering::Acquire),
+            "a failed respawn must not clear the loss"
+        );
+        assert_eq!(flags.state_code(), ST_LOST);
+        assert!(backend.device.is_none());
     }
 }
