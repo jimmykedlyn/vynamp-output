@@ -246,3 +246,52 @@ fn unwritable_path_is_an_os_error() {
         "{r:?}"
     );
 }
+
+#[test]
+fn capture_survives_a_loss_and_keeps_recording_after_recovery() {
+    // The Capture host shares the Null device thread, so recovery (ADR-002)
+    // must keep the ring sink and the writer thread alive: the bytes recorded
+    // after `pause` + `resume` continue the same file, and the manifest is
+    // still written on `stop`.
+    let path = temp_path("recovery");
+    let clock = VirtualClockHandle::new();
+    let host = CaptureHost::new(path.clone()).with_clock(NullClock::Virtual(clock.clone()));
+    let mut s = host
+        .open(
+            &request(SampleFormat::I32 { valid_bits: 32 }),
+            Box::new(ChannelRamp { start: 0, step: 1 }),
+        )
+        .expect("open capture");
+    s.start().unwrap();
+    clock.advance(2);
+    clock.inject_device_lost();
+    clock.advance(1);
+    assert_eq!(s.state(), StreamState::Lost);
+    let before = s.counters().frames_delivered;
+    assert!(before >= 2 * u64::from(PERIOD), "played before the loss");
+    s.pause().expect("recover");
+    s.resume().expect("play again");
+    clock.advance(2);
+    s.stop().unwrap();
+
+    let delivered = s.counters().frames_delivered;
+    assert_eq!(
+        delivered,
+        before + 2 * u64::from(PERIOD),
+        "the two periods after recovery are the only ones added"
+    );
+    let bytes = std::fs::read(&path).expect("capture file");
+    let manifest = std::fs::read_to_string(manifest_path(&path)).expect("manifest");
+    let frame_bytes = 4 * usize::from(CHANNELS);
+    assert_eq!(
+        bytes.len(),
+        delivered as usize * frame_bytes,
+        "the file holds exactly what the ring received"
+    );
+    assert!(
+        manifest.contains(&format!("frames={delivered}")),
+        "{manifest}"
+    );
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(manifest_path(&path));
+}

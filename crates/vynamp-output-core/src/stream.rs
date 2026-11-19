@@ -9,7 +9,7 @@
 //! | `Paused`    | invalid   | invalid  | `Running` | invalid                 | `Stopped` |
 //! | `Draining`  | invalid   | invalid  | invalid   | keeps waiting           | `Stopped` |
 //! | `Stopped`   | invalid   | invalid  | invalid   | invalid                 | no-op `Ok` |
-//! | `Lost`      | invalid   | invalid  | invalid   | invalid                 | `Stopped` |
+//! | `Lost`      | invalid   | `Paused` | invalid   | invalid                 | `Stopped` |
 //!
 //! "invalid" is `Error::InvalidRequest { what: "state" }`. `Lost` is entered
 //! only by a backend notification (device gone), from any state except
@@ -17,6 +17,18 @@
 //! stopped stream cannot be restarted: open a new one. `stop` releases the
 //! device thread and discards the device buffers, so reopening never plays
 //! old audio.
+//!
+//! `Lost --pause--> Paused` is recovery ([ADR-002][adr]): it reopens **the
+//! same** device with the request recorded at open (never another, per
+//! `OUTPUT-REQ-09`), and returns `Paused`; a
+//! later, explicit `resume` plays. Old audio does not replay because the
+//! stream object is new and the period buffer is refilled from the source
+//! before it reaches the device. Reopening can fail — the device may not be
+//! back yet — in which case `pause` returns the backend's error and the
+//! stream stays `Lost`. `resume` from `Lost` stays invalid: it only ever
+//! means `Paused -> Running`.
+//!
+//! [adr]: https://github.com/jimmykedlyn/vynamp-output/blob/develop/docs/adr/ADR-002-lost-recovery.md
 
 use std::fmt;
 use std::sync::Arc;
@@ -84,6 +96,16 @@ pub enum DrainOutcome {
 pub(crate) trait BackendStream: Send {
     fn start(&mut self) -> Result<(), Error>;
     fn pause(&mut self) -> Result<(), Error>;
+    /// Reopens **the same** device after the stream entered `Lost` and clears
+    /// the shared `lost` notification. A second loss is still reported
+    /// because the watcher counts `lost_seq`, not the flag. Called on the
+    /// control thread by `pause` from `Lost`; if the device has not come back
+    /// it returns an error and the stream stays `Lost`. Never opens another
+    /// device (`OUTPUT-REQ-09`).
+    fn recover(&mut self) -> Result<(), Error>;
+    /// Every device this backend opened for the stream, in order. The backend
+    /// owns the record because recovery can add to it; `Stream` only reads it.
+    fn open_attempts(&self) -> &[DeviceId];
     /// Stops the device, discards its buffers and joins its thread, if any.
     fn stop(&mut self) -> Result<(), Error>;
 }
@@ -100,7 +122,6 @@ pub struct Stream {
     backend: Box<dyn BackendStream>,
     watcher: Option<JoinHandle<()>>,
     events: Receiver<Event>,
-    open_attempts: Vec<DeviceId>,
     closed: bool,
 }
 
@@ -110,16 +131,12 @@ fn invalid_state() -> Error {
 
 impl Stream {
     /// Assembles a stream whose device thread and watcher already run.
-    ///
-    /// `open_attempts` is the list the backend recorded while opening this
-    /// stream, in order; it is what [`Stream::open_attempts`] reports.
     pub(crate) fn new(
         config: StreamConfig,
         flags: Arc<RtFlags>,
         backend: Box<dyn BackendStream>,
         watcher: JoinHandle<()>,
         events: Receiver<Event>,
-        open_attempts: Vec<DeviceId>,
     ) -> Self {
         Stream {
             config,
@@ -127,7 +144,6 @@ impl Stream {
             backend,
             watcher: Some(watcher),
             events,
-            open_attempts,
             closed: false,
         }
     }
@@ -145,15 +161,18 @@ impl Stream {
     ///
     /// The backend records the endpoint it actually opened, at the single
     /// point where it opens it; it is evidence and not a restatement of the
-    /// request. A host that falls back must append the second id itself, and
-    /// today neither backend has a fallback path, so the list holds one id.
+    /// request. Recovery (`Lost --pause--> Paused`, ADR-002) appends the same
+    /// id only when it is not already the last entry, so the list stays the
+    /// distinct endpoints opened in order and a recovery that opened another
+    /// device would show up as a different id. Today neither backend has a
+    /// fallback path or opens another device, so the list holds one id.
     /// An empty list means no attempt was recorded (a backend that does not
     /// fill it).
     ///
     /// It is what `OUTPUT-AC-18` and `OUTPUT-BK-AC-19` read when they require
     /// "a lista de dispositivos que o host tentou abrir ou abriu".
     pub fn open_attempts(&self) -> &[DeviceId] {
-        &self.open_attempts
+        self.backend.open_attempts()
     }
 
     /// `Opened -> Running`.
@@ -162,7 +181,28 @@ impl Stream {
     }
 
     /// `Running -> Paused`. The device stops consuming frames.
+    ///
+    /// Also `Lost -> Paused`, which is recovery ([ADR-002][adr]): the backend
+    /// reopens **the same** device and the stream lands paused, ready for an
+    /// explicit [`resume`](Self::resume). If the device is still gone the call
+    /// fails and the stream stays `Lost`.
+    ///
+    /// The state becomes `Paused` **before** the reopen finishes, so a
+    /// concurrent [`state`](Self::state) from another thread may observe
+    /// `Paused` while the device is still coming back. That is deliberate: the
+    /// respawned device thread needs the state out of `Lost` to render.
+    ///
+    /// [adr]: https://github.com/jimmykedlyn/vynamp-output/blob/develop/docs/adr/ADR-002-lost-recovery.md
     pub fn pause(&mut self) -> Result<(), Error> {
+        if self.flags.transition(ST_LOST, ST_PAUSED) {
+            let result = self.backend.recover();
+            // A failed reopen leaves the stream lost, not paused: there is no
+            // device to be paused on.
+            if result.is_err() {
+                self.flags.state.store(ST_LOST, Ordering::Release);
+            }
+            return result;
+        }
         self.go(ST_RUNNING, ST_PAUSED, |b| b.pause())
     }
 

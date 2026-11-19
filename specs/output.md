@@ -78,7 +78,7 @@ acrescenta a seleção de host (`specs/backends.md` §3).
 | Item | Contrato |
 |---|---|
 | `Stream::state()` | `StreamState`: `Opened`, `Running`, `Paused`, `Draining`, `Stopped`, `Lost` |
-| `start` / `pause` / `resume` / `stop` | transições da tabela de estados; uma transição inválida é `Error::InvalidRequest`. `Drop` equivale a `stop` |
+| `start` / `pause` / `resume` / `stop` | transições da tabela de estados; uma transição inválida é `Error::InvalidRequest`. `pause` a partir de `Lost` é a recuperação (ADR-002): reabre o mesmo dispositivo e devolve `Paused`. `Drop` equivale a `stop` |
 | `drain(timeout) -> DrainOutcome` | `Drained` só depois que o último quadro de conteúdo foi entregue; `TimedOut` se a fonte nunca terminar |
 | `timing()` | `Option<PresentationTiming>`, fora da callback |
 | `counters()` | `Counters { source_underruns, os_xruns, frames_delivered, callbacks }` |
@@ -147,7 +147,7 @@ pub trait RenderSource: Send + 'static {
 | `OUTPUT-REQ-06` | PCM inteiro (I24Packed, I32 com bits válidos, F32) chega bit a bit ao ponto de captura, sem troca de canais — implemented no host `Capture`; planned (M3) em hardware | `REQ-E04-06` | `TASK-E04-06` | `tests/capture.rs` |
 | `OUTPUT-REQ-07` | DoP DSD64/128/256 em 176,4/352,8/705,6 kHz, com marcador contínuo através de períodos e underrun, e recusado em caminho misto, desconhecido, shared, com volume não unity ou com conversão — implemented | `REQ-E12-04` | `TASK-E12-04` | `tests/dop.rs` |
 | `OUTPUT-REQ-08` | Máquina de estados fixa; `drain` termina exatamente após o último quadro de conteúdo ou devolve `TimedOut`; `Drop` para o stream — implemented | `REQ-E01-02` | `TASK-E01-02` | `tests/stream.rs` |
-| `OUTPUT-REQ-09` | `DeviceLost` vem só do backend; a biblioteca nunca migra para outro dispositivo sozinha — implemented no contrato; implemented no host WASAPI (nunca reabre, só `Lost`); provado em hardware ainda não | `REQ-E04-05` | `TASK-E04-05` | `tests/stream.rs`; `wasapi_host.rs` |
+| `OUTPUT-REQ-09` | `DeviceLost` vem só do backend; a biblioteca nunca migra para outro dispositivo sozinha. A recuperação (`Lost --pause--> Paused`, ADR-002) reabre **o mesmo** dispositivo, com o pedido registrado no open, e `open_attempts` nunca recebe outro id — implemented no contrato; implemented no host WASAPI (reabre só o mesmo endpoint), não provado em hardware | `REQ-E04-05` | `TASK-E04-05` | `tests/stream.rs`; `wasapi_host.rs` |
 | `OUTPUT-REQ-10` | A matriz de suporte publicada é igual à gerada pelo código — implemented | `REQ-E01-02` | `TASK-E01-02` | `crates/vynamp-output/tests/support_matrix.rs` |
 | `OUTPUT-REQ-11` | Formato DSD nativo (`DsdNative`) distinto de `Dop` em `SampleFormat` e `StreamConfig` — planned (M5) | `REQ-E12-04` | `TASK-E12-04` | — |
 | `OUTPUT-REQ-12` | PCM 768 kHz anunciado e aberto quando o dispositivo suporta — planned (M5) | `REQ-E12-04` | `TASK-E12-04` | — |
@@ -162,7 +162,7 @@ pub trait RenderSource: Send + 'static {
 | `OUTPUT-AC-02` | uma fonte que devolve menos quadros que o período | o período é entregue | o restante é silêncio, `source_underruns` sobe 1 por período curto e nenhuma amostra se repete | `stream.rs::underrun_is_counted_once_per_short_period`; `capture.rs::f32_bytes_are_bit_exact_with_underrun_silence` |
 | `OUTPUT-AC-03` | o host `Null` com relógio virtual | o stream avança períodos e pausa | os períodos são exatos em quadros e um tick pausado não entrega nada | `stream.rs::periods_are_frame_exact_and_paused_ticks_deliver_nothing` |
 | `OUTPUT-AC-04` | uma fonte que entra em panic | a callback seguinte roda | sai silêncio, a cadência se mantém e `SourcePanicked` chega uma vez | `stream.rs::panic_gives_silence_one_event_and_keeps_cadence` |
-| `OUTPUT-AC-05` | um stream em cada estado | cada operação é chamada | a transição segue a tabela; as inválidas são `InvalidRequest` | `stream.rs::{state_machine_table, stop_from_opened_and_paused, drop_stops_the_stream}` |
+| `OUTPUT-AC-05` | um stream em cada estado | cada operação é chamada | a transição segue a tabela; as inválidas são `InvalidRequest`; `Lost --pause--> Paused` recupera e `resume` a partir de `Lost` continua inválido | `stream.rs::{state_machine_table, stop_from_opened_and_paused, drop_stops_the_stream, lost_recovers_with_pause_then_resume_and_keeps_the_source, resume_from_lost_stays_invalid}` |
 | `OUTPUT-AC-06` | uma fonte que sinaliza fim, e outra que nunca termina | `drain(timeout)` é chamado | `Drained` exatamente após o último quadro de conteúdo; `TimedOut` para a fonte sem fim | `stream.rs::{drain_completes_exactly_after_the_last_content_frame, drain_times_out_when_the_source_never_ends}` |
 | `OUTPUT-AC-07` | capacidades sem o formato pedido | `negotiate` roda com `Error` e com `Downgrade` | com `Error`: `FormatUnsupported { nearest }`; com `Downgrade`: abre o mais próximo pela regra de §3.2, com motivo | `negotiate.rs::{downgrade_returns_nearest_with_reason, downgrade_without_candidates_is_an_error, nearest_prefers_rate_at_or_above, nearest_rate_dominates_container_width, nearest_only_considers_same_mode}` |
 | `OUTPUT-AC-08` | um downgrade aceito no host `Null` | o stream é aberto e iniciado | `Downgraded` chega antes da primeira callback | `null_host.rs::downgrade_event_comes_before_the_first_callback` |
@@ -171,10 +171,10 @@ pub trait RenderSource: Send + 'static {
 | `OUTPUT-AC-11` | DSD64/128/256 em DoP no `Null` e no `Capture` | o stream toca, sofre underrun e fica em silêncio | taxa da portadora = DSD/16; os marcadores alternam sem quebra; o silêncio é o idle pattern | `dop.rs::{pcm_rate_is_dsd_rate_over_16, null_opens_dsd64_128_256_at_their_carrier_rates, markers_continue_across_periods_and_an_underrun, silence_is_idle_pattern_with_alternating_markers}` |
 | `OUTPUT-AC-12` | um caminho DoP misto ou desconhecido, shared, com volume não unity ou com conversão | o stream DoP é aberto | erro, nunca DoP pelo mixer; volume `Unknown` abre com `DopVolumeUnverified` | `dop.rs::{refused_on_a_mixed_or_unknown_path, refused_on_a_shared_path, refused_when_endpoint_volume_is_not_unity, refused_with_library_conversion, unknown_endpoint_volume_opens_with_a_warning}` |
 | `OUTPUT-AC-13` | um dispositivo só DSD64 | DSD128 é pedido com `Downgrade` | abre DSD64 em DoP, nunca PCM | `dop.rs::dsd128_downgrades_to_dsd64_on_a_dsd64_only_device`; `negotiate.rs::dop_request_never_gets_pcm_nearest` |
-| `OUTPUT-AC-14` | um stream no `Null` | o host não sinaliza perda | `DeviceLost` nunca aparece; só o backend o produz | `stream.rs::device_lost_comes_only_from_the_backend` |
+| `OUTPUT-AC-14` | um stream no `Null` | o host não sinaliza perda | `DeviceLost` nunca aparece; só o backend o produz, e cada perda é um evento novo mesmo depois de uma recuperação | `stream.rs::{device_lost_comes_only_from_the_backend, a_second_loss_after_recovery_is_reported_again}` |
 | `OUTPUT-AC-15` | o código atual | `support_matrix_markdown()` roda | o resultado é igual a `docs/support-matrix.md` | `support_matrix.rs::committed_matrix_matches_generator` |
 | `OUTPUT-AC-16` | um DAC USB que anuncia 24 bits válidos em 96 kHz e em 192 kHz, ligado a uma máquina Windows 11, e um host WASAPI event-exclusive já presente na lista de `hosts()` do módulo | o cliente abre `ShareMode::Exclusive` com `DeviceSelector::Id` do DAC, `SampleFormat::I24Packed`, `Conversion::Forbid` e `OnUnavailable::Error`, uma vez a 96 000 Hz e outra a 192 000 Hz, e lê `stream.config()`, `config.valid_bits` e `config.path.os_mixer_bypassed` nos dois streams | 24/96 e 24/192 negociados em DAC (TASK-E04-05-AC-1) | `wasapi_exclusive.rs::dac_negotiates_24_96_and_24_192` (`#[ignore]`, hardware) |
-| `OUTPUT-AC-17` | um stream exclusivo I24Packed a 96 000 Hz tocando num DAC USB em Windows 11, com outro processo pronto para ocupar o mesmo dispositivo em exclusivo, o cabo USB ao alcance e a suspensão da máquina habilitada | as três condições são induzidas em sequência (busy do dispositivo, unplug do cabo e sleep seguido de resume), e depois de cada uma o cliente lê a fila de `Event` do `Stream`, o `StreamState` corrente e a posição apresentada, e chama `resume` depois que o dispositivo volta | busy/unplug/sleep recuperam com pausa (TASK-E04-05-AC-2) | `wasapi_exclusive.rs::busy_unplug_and_sleep_recover_with_pause` (`#[ignore]`, hardware) |
+| `OUTPUT-AC-17` | um stream exclusivo I24Packed a 96 000 Hz tocando num DAC USB em Windows 11, com outro processo pronto para ocupar o mesmo dispositivo em exclusivo, o cabo USB ao alcance e a suspensão da máquina habilitada | as três condições são induzidas em sequência (busy do dispositivo, unplug do cabo e sleep seguido de resume), e depois de cada uma o cliente lê a fila de `Event` do `Stream`, o `StreamState` corrente e a posição apresentada, e chama `pause` — que reabre o mesmo dispositivo — e depois `resume`, quando o dispositivo volta | busy/unplug/sleep recuperam com pausa (TASK-E04-05-AC-2) | `wasapi_exclusive.rs::busy_unplug_and_sleep_recover_with_pause` (`#[ignore]`, hardware) |
 | `OUTPUT-AC-18` | um DAC USB aberto por `DeviceSelector::Id` em `ShareMode::Exclusive` e, ao lado, o alto-falante interno que o Windows expõe como default do role `Multimedia`, sem nenhuma preferência de fallback autorizada no perfil do dispositivo | o cabo do DAC é removido com o stream em `Running` e o cliente lê o `StreamState` final e a lista de dispositivos que o host tentou abrir ou abriu | sem fallback speaker automático (TASK-E04-05-AC-3) | `wasapi_exclusive.rs::unplug_does_not_fall_back_to_the_default_speaker` (`#[ignore]`, hardware) |
 
 > `OUTPUT-AC-16` a `OUTPUT-AC-18` foram autorados em 2026-11-15 a partir de
@@ -217,7 +217,7 @@ conteúdo.
 | Exclusivo ou DoP impossível no caminho | `ExclusiveUnavailable { reason }` |
 | Formato fora das capacidades, sem `Downgrade` | `FormatUnsupported { nearest }` |
 | Permissão negada pelo OS | `PermissionDenied` |
-| Dispositivo removido durante o stream | estado `Lost` + `Event::DeviceLost`; operações seguintes são `DeviceLost` |
+| Dispositivo removido durante o stream | estado `Lost` + `Event::DeviceLost`; só `pause` (recuperação, reabre **o mesmo** dispositivo) e `stop` são aceitos. `pause` falha com o erro do backend e o stream fica `Lost` se o dispositivo ainda não voltou |
 | Enumeração travada | `Timeout` (`specs/backends.md`) |
 | Pedido inválido (canais 0, taxa 0, conversão impossível, transição de estado inválida) | `InvalidRequest { what }` |
 | Falha do OS sem mapeamento | `Os { backend, code, call }` |
@@ -251,7 +251,7 @@ cargo test --workspace
 
 | Arquivo | Prova |
 |---|---|
-| `crates/vynamp-output-core/tests/stream.rs` | estados, períodos, underrun, panic, drain, perda, drop, relógio virtual |
+| `crates/vynamp-output-core/tests/stream.rs` | estados, períodos, underrun, panic, drain, perda, recuperação por `pause`, drop, relógio virtual |
 | `crates/vynamp-output-core/tests/negotiate.rs` | negociação exata, mais próximo, downgrade, conversão, pedidos inválidos, Display de erros e eventos |
 | `crates/vynamp-output-core/tests/capture.rs` | oráculo bit a bit: rampa conhecida comparada com os bytes gravados |
 | `crates/vynamp-output-core/tests/dop.rs` | empacotamento DoP, marcadores, idle, recusas de caminho |
@@ -274,7 +274,7 @@ cargo test --workspace
 | O host WASAPI existe (exclusivo) mas nunca rodou em hardware | `support(Wasapi, _)` é `Compiled` nos recursos que o backend tem e `None` em DoP, que `to_wasapi` recusa: o alvo compila, nada foi medido; as ACs de DAC ficam `#[ignore]` até um run real | `docs/hardware-matrix.md`, `TASK-E04-05` |
 | Todo recurso está em `LibraryVerified` | não há prova em hardware nem de integração | `docs/hardware-matrix.md`, `TASK-E04-06` |
 | `DsdNative` e PCM 768 kHz não existem | DSD só por DoP | `OUTPUT-REQ-11` e `OUTPUT-REQ-12`, `TASK-E12-04` (M5) |
-| `Stream::reconfigure(rate)` do design não existe | troca de taxa em exclusivo exige fechar e reabrir o stream | futura TASK de hosts reais |
+| `Stream::reconfigure(rate)` do design não existe | troca de taxa em exclusivo exige fechar e reabrir o stream. A recuperação de `Lost` (ADR-002) reabre o mesmo dispositivo com o mesmo formato, nunca com outro | futura TASK de hosts reais |
 | A feature `resample` não está ligada a código | `vynamp-dsp` ainda não é usado; a biblioteca nunca faz resampling | `specs/backends.md` |
 | Com `panic = "abort"` não há captura de panic | `SourcePanicked` não chega; o processo aborta | documentado; o hook de panic é do aplicativo |
 | Diagnóstico Bluetooth e perfis de dispositivo não existem | E17-19 e E04-09 dependem de API nova | `OUTPUT-REQ-13` e `OUTPUT-REQ-14` |

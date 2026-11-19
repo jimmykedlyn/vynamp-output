@@ -214,14 +214,11 @@ fn dac_negotiates_24_96_and_24_192() {
 #[ignore = "needs a real USB DAC, a second contending process and suspend/resume; see docs/hardware-matrix.md"]
 fn busy_unplug_and_sleep_recover_with_pause() {
     // `OUTPUT-AC-17`'s Then says the three conditions "recuperam com pausa".
-    // The state table in `stream.rs` says a `Lost` stream refuses `pause` and
-    // `resume` (`InvalidRequest { what: "state" }`), and the backend moves to
-    // `Lost` on every device-gone code, so the recovery this code actually
-    // has is an explicit reopen. Each step below asserts the loss, the state,
-    // the presented position, that `resume` is refused, and then recovers by
-    // reopening — the observable path, not the one the Then names. The
-    // divergence is reported to the maintainer rather than papered over by
-    // asserting a `pause` that cannot succeed.
+    // `Lost --pause--> Paused` is the recovery transition (ADR-002): `pause`
+    // reopens **the same** endpoint with the request recorded at open, and a
+    // later explicit `resume` plays. Each step below asserts the loss, the
+    // state, the presented position, that `resume` from `Lost` is still
+    // refused, and then recovers with `pause` + `resume` on the same stream.
     let host = wasapi_host().expect("hosts() lists the WASAPI host on Windows");
 
     // 1. Busy: another process takes the device in exclusive mode. WASAPI
@@ -234,21 +231,46 @@ fn busy_unplug_and_sleep_recover_with_pause() {
     assert_eq!(
         stream.resume(),
         Err(Error::InvalidRequest { what: "state" }),
-        "busy: a Lost stream refuses resume, which is why recovery reopens"
+        "busy: resume from Lost stays invalid; recovery is pause"
     );
-    stream.stop().expect("busy: stop the lost stream");
-    let mut stream = open_and_start(host.as_ref(), "busy/reopen");
-    assert_eq!(stream.state(), StreamState::Running, "busy: reopened");
+    // The contending process must have released the device before this runs;
+    // the operator protocol says so. A failure here means the device is still
+    // busy, and the stream stays `Lost` — which is the documented outcome.
+    stream
+        .pause()
+        .unwrap_or_else(|e| panic!("busy: pause must reopen the same device: {e}"));
+    assert_eq!(
+        stream.state(),
+        StreamState::Paused,
+        "busy: recovered paused"
+    );
+    stream
+        .resume()
+        .unwrap_or_else(|e| panic!("busy: resume after recovery: {e}"));
+    assert_eq!(stream.state(), StreamState::Running, "busy: playing again");
 
     // 2. Unplug: the cable is pulled with the stream running.
     operator_step("unplug");
     assert_lost(&stream, "unplug");
     let position = presented_position(&stream, "unplug");
     assert!(position > 0, "unplug: the position must have advanced");
-    stream.stop().expect("unplug: stop the lost stream");
     operator_step("replug");
-    let mut stream = open_and_start(host.as_ref(), "unplug/reopen");
-    assert_eq!(stream.state(), StreamState::Running, "unplug: reopened");
+    stream
+        .pause()
+        .unwrap_or_else(|e| panic!("unplug: pause must reopen the same device: {e}"));
+    assert_eq!(
+        stream.state(),
+        StreamState::Paused,
+        "unplug: recovered paused"
+    );
+    stream
+        .resume()
+        .unwrap_or_else(|e| panic!("unplug: resume after recovery: {e}"));
+    assert_eq!(
+        stream.state(),
+        StreamState::Running,
+        "unplug: playing again"
+    );
 
     // 3. Sleep: the machine is suspended and resumed. The stream's resources
     //    are invalidated, which the backend also reports as device-gone.
@@ -256,9 +278,25 @@ fn busy_unplug_and_sleep_recover_with_pause() {
     assert_lost(&stream, "sleep");
     let position = presented_position(&stream, "sleep");
     assert!(position > 0, "sleep: the position must have advanced");
-    stream.stop().expect("sleep: stop the lost stream");
-    let mut stream = open_and_start(host.as_ref(), "sleep/reopen");
-    assert_eq!(stream.state(), StreamState::Running, "sleep: reopened");
+    stream
+        .pause()
+        .unwrap_or_else(|e| panic!("sleep: pause must reopen the same device: {e}"));
+    assert_eq!(
+        stream.state(),
+        StreamState::Paused,
+        "sleep: recovered paused"
+    );
+    stream
+        .resume()
+        .unwrap_or_else(|e| panic!("sleep: resume after recovery: {e}"));
+    assert_eq!(stream.state(), StreamState::Running, "sleep: playing again");
+
+    // Recovery never opened another device: the list holds the DAC only.
+    assert_eq!(
+        stream.open_attempts(),
+        &[dac_id()],
+        "recovery must reopen the same endpoint, never another"
+    );
     stream.stop().expect("sleep: stop");
 }
 

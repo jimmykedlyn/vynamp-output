@@ -35,5 +35,21 @@ priority outcome. The library never applies gain.
 ## Lost devices
 
 The library never migrates a stream on its own. On unplug or default change it
-emits an event; a lost stream stays `Lost` until the application stops it and
-opens a new one. Stopping discards device buffers so old audio never replays.
+emits `Event::DeviceLost` and the stream moves to `Lost`.
+
+Recovery is `pause`, not `resume` (ADR-002). `pause` from `Lost` reopens **the
+same** device with the request recorded at open and leaves the stream
+`Paused`; a later, explicit `resume` plays. The `RenderSource` and the
+counters survive the loss, so the application does not build a new stream.
+Reopening is long and can fail: if the device has not come back, `pause`
+returns the backend's error and the stream stays `Lost`, and the application
+may retry `pause` later or `stop`.
+
+Old audio does not replay after recovery: the stream object is new, and the
+driver's period buffer is rewritten from the source before it is written to
+the device. (This is the design argument, not a measured result — the `Null`
+backend discards its sink, so it has no buffer to test, and the WASAPI path
+has no test for it.)
+
+`resume` from `Lost` is invalid — it only ever means `Paused -> Running`.
+Stopping discards device buffers so old audio never replays.

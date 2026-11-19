@@ -281,6 +281,97 @@ fn device_lost_comes_only_from_the_backend() {
 }
 
 #[test]
+fn lost_recovers_with_pause_then_resume_and_keeps_the_source() {
+    // `OUTPUT-AC-17`'s recovery path, on the Null host: `Lost --pause-->
+    // Paused` reopens the same device, and an explicit `resume` plays again.
+    let (src, calls, gaps) = recorder(None);
+    let (clock, mut s) = open(src);
+    s.start().unwrap();
+    clock.advance(2);
+    assert_eq!(s.counters().callbacks, 2);
+
+    clock.inject_device_lost();
+    clock.advance(1);
+    assert_eq!(s.state(), StreamState::Lost);
+    assert_eq!(events(&s), vec![Event::DeviceLost]);
+    let lost_at = s.counters().frames_delivered;
+    assert_eq!(lost_at, 2 * u64::from(PERIOD));
+
+    // Recovery: the same device is reopened, the stream lands paused.
+    assert_eq!(s.pause(), Ok(()));
+    assert_eq!(s.state(), StreamState::Paused);
+    clock.advance(2); // paused ticks deliver nothing
+    assert_eq!(s.counters().frames_delivered, lost_at);
+
+    // An explicit resume plays again, and the position keeps advancing.
+    assert_eq!(s.resume(), Ok(()));
+    assert_eq!(s.state(), StreamState::Running);
+    clock.advance(3);
+    let c = s.counters();
+    assert_eq!(c.frames_delivered, lost_at + 3 * u64::from(PERIOD));
+    assert_eq!(c.callbacks, 5, "the source survived the loss");
+    assert_eq!(calls.load(Ordering::Relaxed), 5);
+    assert_eq!(
+        gaps.load(Ordering::Relaxed),
+        0,
+        "device_frame_index stays contiguous across recovery"
+    );
+    let t = s.timing().expect("timing after recovery");
+    assert_eq!(t.device_frame, 4 * u64::from(PERIOD));
+    assert!(events(&s).is_empty(), "recovery emits no event");
+    // Recovery reopened the same device and never another (`OUTPUT-REQ-09`).
+    assert_eq!(
+        s.open_attempts(),
+        &[s.config().device.clone()],
+        "the list holds the one endpoint the backend opened"
+    );
+    s.stop().unwrap();
+}
+
+#[test]
+fn a_second_loss_after_recovery_is_reported_again() {
+    // The watcher counts losses by `flags.lost_seq`, not by the `lost` flag:
+    // `Seen::losses` compares the sequence number, so the second loss is new
+    // even though recovery may have cleared `lost`.
+    let (clock, mut s) = open(ChannelRamp { start: 0, step: 1 });
+    s.start().unwrap();
+    clock.advance(1);
+    clock.inject_device_lost();
+    clock.advance(1);
+    assert_eq!(events(&s), vec![Event::DeviceLost]);
+    s.pause().unwrap();
+    s.resume().unwrap();
+    clock.advance(1);
+    clock.inject_device_lost();
+    clock.advance(1);
+    assert_eq!(s.state(), StreamState::Lost);
+    assert_eq!(
+        events(&s),
+        vec![Event::DeviceLost],
+        "the second loss is a new event"
+    );
+    s.stop().unwrap();
+}
+
+#[test]
+fn resume_from_lost_stays_invalid() {
+    // `resume` only ever means `Paused -> Running`; recovery is `pause`.
+    let (clock, mut s) = open(ChannelRamp { start: 0, step: 1 });
+    s.start().unwrap();
+    clock.advance(1);
+    clock.inject_device_lost();
+    clock.advance(1);
+    assert_eq!(s.state(), StreamState::Lost);
+    assert_eq!(s.resume(), Err(state_err()));
+    assert_eq!(
+        s.state(),
+        StreamState::Lost,
+        "a refused resume changes nothing"
+    );
+    s.stop().unwrap();
+}
+
+#[test]
 fn drop_stops_the_stream() {
     let (clock, mut s) = open(ChannelRamp { start: 0, step: 1 });
     s.start().unwrap();
@@ -311,4 +402,40 @@ fn a_virtual_clock_drives_one_stream_at_a_time() {
     b.start().unwrap();
     clock.advance(2);
     assert_eq!(b.counters().callbacks, 2);
+}
+
+/// A source whose `Drop` panics, to prove `stop` is not turned into a panic
+/// by the driver being dropped on the control thread after a recovery.
+struct PanicsOnDrop;
+
+impl RenderSource for PanicsOnDrop {
+    fn render(&mut self, _out: DeviceBuffer<'_>, ctx: &RenderContext<'_>) -> Rendered {
+        Rendered {
+            frames: ctx.frames,
+            end_of_stream: false,
+        }
+    }
+}
+
+impl Drop for PanicsOnDrop {
+    fn drop(&mut self) {
+        panic!("testkit PanicsOnDrop: deliberate panic in Drop");
+    }
+}
+
+#[test]
+fn stop_after_recovery_swallows_a_panicking_source_drop() {
+    // Before recovery the driver was dropped on the device thread and its
+    // panic was swallowed by `join`; after recovery it is dropped on the
+    // control thread, which must still not panic `stop`.
+    let (clock, mut s) = open(PanicsOnDrop);
+    s.start().unwrap();
+    clock.advance(1);
+    clock.inject_device_lost();
+    clock.advance(1);
+    s.pause().expect("recover");
+    s.resume().expect("play again");
+    clock.advance(1);
+    assert_eq!(s.stop(), Ok(()));
+    assert_eq!(s.state(), StreamState::Stopped);
 }
